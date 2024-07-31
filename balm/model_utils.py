@@ -49,3 +49,13 @@ def wrap_model(
     if torch.cuda.device_count() > 1:
         model = torch.nn.DataParallel(model)
     return model
+
+
+DTYPES = {
+    "float16": torch.float16,
+    "float32": torch.float32,
+    "bfloat16": torch.bfloat16,
+    "fp16": torch.float16,
+    "fp32": torch.float32,
+    "bf16": torch.bfloat16,
+}
