@@ -193,6 +193,7 @@ class BalmMoEConfig(BaseConfig):
         self.token_embedding_dropout = float(token_embedding_dropout)
         self.layer_norm_eps = float(layer_norm_eps)
         self.padding_idx = int(padding_idx)
+
         # classification head
         self.num_labels = int(num_labels)
         self.classifier_dropout = float(classifier_dropout)
