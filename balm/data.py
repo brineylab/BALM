@@ -136,10 +136,42 @@ class DatasetDict:
         func: Callable,
         remove_columns: Optional[Union[str, Iterable[str]]] = None,
         rename_columns: Optional[Dict[str, str]] = None,
-    ):
+        preprocess_fn: Optional[Callable] = None,
+        preprocess_kwargs: Optional[Dict[str, Any]] = None,
+    ) -> "DatasetDict":
+        """
+        Maps a function to the dataset.
+
+        Parameters
+        ----------
+        func : Callable
+            The function to map to the dataset.
+
+        remove_columns : Optional[Union[str, Iterable[str]]]
+            The columns to remove from the dataset.
+
+        rename_columns : Optional[Dict[str, str]]
+            The columns to rename in the dataset.
+
+        preprocess_fn : Optional[Callable]
+            A function to preprocess the dataset. The function must accept a single dataset (torch.Tensor or dict of torch.Tensor)
+            as input, and return a processed version of the dataset.
+
+        preprocess_kwargs : Optional[Dict[str, Any]]
+        Keyword arguments to pass to the preprocessing function.
+
+        Returns
+        -------
+        DatasetDict
+            The processed dataset.
+
+        """
         cloned_data = {k: v.clone() for k, v in self.items()}
         dataset_dict = self.__class__(cloned_data)
         for dataset in dataset_dict.values():
+            if preprocess_fn is not None:
+                preprocess_kwargs = preprocess_kwargs or {}
+                dataset = preprocess_fn(dataset, **preprocess_kwargs)
             result = func(dataset)
             if not isinstance(result, (dict, BatchEncoding)):
                 raise ValueError(
@@ -192,7 +224,7 @@ class DataCollator:
         """
         # convert to tensors if necessary
         if isinstance(examples, dict):
-            batch = examples
+            batch = {k: torch.tensor(v) for k, v in examples.items()}
         elif isinstance(examples, torch.Tensor):
             batch = {"input_ids": examples}
         else:
@@ -206,11 +238,11 @@ class DataCollator:
             # TODO: implement mask_probs
             # not sure how they'll be formatted -- as a stacked tensor, a list of tensors, or a list of CIGAR-like strings
             batch["input_ids"], batch["labels"] = self.mask_tokens(batch["input_ids"])
-        else:
-            labels = batch["input_ids"].clone()
-            if self.tokenizer.pad_token_id is not None:
-                labels[labels == self.tokenizer.pad_token_id] = -100
-            batch["labels"] = labels
+        # else:
+        #     labels = batch["input_ids"].clone()
+        #     if self.tokenizer.pad_token_id is not None:
+        #         labels[labels == self.tokenizer.pad_token_id] = -100
+        #     batch["labels"] = labels
 
         # key padding mask
         kp_mask = torch.zeros_like(batch["input_ids"])  # 1 for non-pad tokens
@@ -318,6 +350,7 @@ def load_dataset(
     data_files: Dict[str, str],
     strip_lines: bool = True,
     preprocess_fn: Optional[Callable] = None,
+    preprocess_kwargs: Optional[Dict[str, Any]] = None,
 ):
     """
     Loads a dataset.
@@ -348,6 +381,9 @@ def load_dataset(
         this function should accept and return a single row of the CSV or
         TSV file (as a dictionary mapping column names to values).
 
+    preprocess_kwargs : Optional[Dict[str, Any]]
+        Keyword arguments to pass to the preprocessing function.
+
     Returns
     -------
     DatasetDict
@@ -360,33 +396,39 @@ def load_dataset(
             data_files=data_files,
             strip_lines=strip_lines,
             preprocess_fn=preprocess_fn,
+            preprocess_kwargs=preprocess_kwargs,
         )
     elif path == "csv":
         return _load_tabular_dataset(
             data_files=data_files,
             preprocess_fn=preprocess_fn,
+            preprocess_kwargs=preprocess_kwargs,
             sep=",",
         )
     elif path == "tsv":
         return _load_tabular_dataset(
             data_files=data_files,
             preprocess_fn=preprocess_fn,
+            preprocess_kwargs=preprocess_kwargs,
             sep="\t",
         )
     elif path in ["df", "dataframe"]:
         return _load_dataframe_dataset(
             dataframes=data_files,
             preprocess_fn=preprocess_fn,
+            preprocess_kwargs=preprocess_kwargs,
         )
     elif path == "json":
         return _load_json_dataset(
             data_files=data_files,
             preprocess_fn=preprocess_fn,
+            preprocess_kwargs=preprocess_kwargs,
         )
     elif path == "parquet":
         return _load_parquet_dataset(
             data_files=data_files,
             preprocess_fn=preprocess_fn,
+            preprocess_kwargs=preprocess_kwargs,
         )
     else:
         raise ValueError(f"Invalid dataset type: {path}")
@@ -397,6 +439,7 @@ def _load_text_dataset(
     data_files: Dict[str, str],
     strip_lines: bool = True,
     preprocess_fn: Optional[Callable] = None,
+    preprocess_kwargs: Optional[Dict[str, Any]] = None,
 ):
     dataset_dict = {}
     for name, files in data_files.items():
@@ -413,7 +456,10 @@ def _load_text_dataset(
                 if strip_lines:
                     file_data = [line.strip() for line in file_data]
                 if preprocess_fn is not None:
-                    file_data = [preprocess_fn(line) for line in file_data]
+                    preprocess_kwargs = preprocess_kwargs or {}
+                    file_data = [
+                        preprocess_fn(line, **preprocess_kwargs) for line in file_data
+                    ]
                 data.extend(file_data)
         dataset_dict[name] = Dataset({path: data})
     return DatasetDict(dataset_dict)
@@ -422,6 +468,7 @@ def _load_text_dataset(
 def _load_tabular_dataset(
     data_files: Dict[str, str],
     preprocess_fn: Optional[Callable] = None,
+    preprocess_kwargs: Optional[Dict[str, Any]] = None,
     sep: str = ",",
 ):
     dataset_dict = {}
@@ -438,7 +485,8 @@ def _load_tabular_dataset(
                 reader = csv.DictReader(f, delimiter=sep)
                 for row in reader:
                     if preprocess_fn is not None:
-                        row = preprocess_fn(row)
+                        preprocess_kwargs = preprocess_kwargs or {}
+                        row = preprocess_fn(row, **preprocess_kwargs)
                     data.append(row)
         dataset_dict[name] = Dataset(data)
     return DatasetDict(dataset_dict)
@@ -447,6 +495,7 @@ def _load_tabular_dataset(
 def _load_dataframe_dataset(
     dataframes: Dict[str, str],
     preprocess_fn: Optional[Callable] = None,
+    preprocess_kwargs: Optional[Dict[str, Any]] = None,
 ):
     dataset_dict = {}
     for name, df in dataframes.items():
@@ -465,7 +514,9 @@ def _load_dataframe_dataset(
             for row in df.iterrows(**iter_kwargs):
                 if is_pandas:
                     _, row = row
-                row = preprocess_fn(row)
+                if preprocess_fn is not None:
+                    preprocess_kwargs = preprocess_kwargs or {}
+                    row = preprocess_fn(row, **preprocess_kwargs)
                 data.append(row)
             dataset_dict[name] = Dataset(df)
     return DatasetDict(dataset_dict)
@@ -474,6 +525,7 @@ def _load_dataframe_dataset(
 def _load_json_dataset(
     data_files: Dict[str, str],
     preprocess_fn: Optional[Callable] = None,
+    preprocess_kwargs: Optional[Dict[str, Any]] = None,
 ):
     dataset_dict = {}
     for name, files in data_files.items():
@@ -489,7 +541,8 @@ def _load_json_dataset(
                 json_data = json.load(f)
                 for json_elem in json_data:
                     if preprocess_fn is not None:
-                        json_elem = preprocess_fn(json_elem)
+                        preprocess_kwargs = preprocess_kwargs or {}
+                        json_elem = preprocess_fn(json_elem, **preprocess_kwargs)
                     data.append(json_elem)
         dataset_dict[name] = Dataset(data)
     return DatasetDict(dataset_dict)
@@ -498,6 +551,7 @@ def _load_json_dataset(
 def _load_parquet_dataset(
     data_files: Dict[str, str],
     preprocess_fn: Optional[Callable] = None,
+    preprocess_kwargs: Optional[Dict[str, Any]] = None,
 ):
     dataset_dict = {}
     for name, files in data_files.items():
@@ -513,6 +567,9 @@ def _load_parquet_dataset(
         else:
             data = []
             for row in df.iterrows(named=True):
-                data.append(preprocess_fn(row))
+                if preprocess_fn is not None:
+                    preprocess_kwargs = preprocess_kwargs or {}
+                    row = preprocess_fn(row, **preprocess_kwargs)
+                data.append(row)
             dataset_dict[name] = Dataset(data)
     return DatasetDict(dataset_dict)
