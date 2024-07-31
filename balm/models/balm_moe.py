@@ -29,13 +29,14 @@ import torch.nn as nn
 from ..config import BalmMoEConfig
 from ..loss import router_load_balancing_loss, router_z_loss
 from ..modules import (
-    BalmClassificationHead,
     BalmLMHead,
+    BalmSequenceClassificationHead,
     ClassifierOutput,
     DenseTransformerLayer,
-    MaskedLMOutput,
+    # MaskedLMOutput,
     SparseTransformerLayer,
 )
+from ..outputs import MaskedLMOutput, SequenceClassifierOutput
 from .base import BalmBase
 
 __all__ = [
@@ -429,7 +430,7 @@ class BalmMoEForSequenceClassification(BalmBase):
         )
         # classifier_dropout = self.config.dropout
         # classifier_activation = "tanh"
-        self.classifier = BalmClassificationHead(
+        self.classifier = BalmSequenceClassificationHead(
             embed_dim=self.config.embed_dim,
             num_labels=self.config.num_labels,
             dropout=classifier_dropout,
