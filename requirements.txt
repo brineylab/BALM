@@ -2,5 +2,8 @@ abstar
 abutils
 datasets
 numpy
-pandas
+pandas 
+peft
+polars
+safetensors
 transformers
