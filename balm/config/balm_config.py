@@ -34,7 +34,7 @@ class BalmConfig(BaseConfig):
         num_heads: int = 20,
         num_experts: int = 8,
         max_length: int = 320,
-        vocab_size: int = 33,
+        vocab_size: int = 32,
         dropout: float = 0.1,
         attention_dropout: float = 0.0,
         token_embedding_dropout: float = 0.0,

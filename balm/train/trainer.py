@@ -34,10 +34,19 @@ from transformers.trainer import is_peft_available
 
 from ..models.base import SAFE_WEIGHTS_NAME, WEIGHTS_NAME, BalmBase, unwrap_model
 
-TRAINING_ARGS_NAME = "training_args.bin"
+TRAINING_ARGS_NAME = "training_args.bin"  # matches 🤗 nomenclature
 
 
 class Trainer(HuggingFaceTrainer):
+    """
+    A custom trainer class that extends the HuggingFace Trainer class.
+
+    The only difference is a new `_save()` method that allows saving ``BalmBase`` models using
+    the ``model.save_pretrained()`` method.
+
+    This is necessary because ``BalmBase`` models are not HuggingFace ``PreTrainedModel`` instances.
+    """
+
     def _save(self, output_dir: Optional[str] = None, state_dict=None):
         # If we are executing this function, we are the process zero, so we don't check for that.
         output_dir = output_dir if output_dir is not None else self.args.output_dir
@@ -45,7 +54,7 @@ class Trainer(HuggingFaceTrainer):
         # logger.info(f"Saving model checkpoint to {output_dir}")
 
         supported_classes = (
-            (PreTrainedModel, BalmBase)  # in 🤗 Trainer, this is (PreTrainedModel,)
+            (PreTrainedModel, BalmBase)  # in the 🤗 Trainer, this is (PreTrainedModel,)
             if not is_peft_available()
             else (PreTrainedModel, PeftModel, BalmBase)  # (PreTrainedModel, PeftModel)
         )
