@@ -27,13 +27,13 @@ from typing import Optional
 
 import safetensors
 import torch
+from peft import PeftModel
 from transformers import PreTrainedModel
 from transformers import Trainer as HuggingFaceTrainer
 from transformers.trainer import (
     SAFE_WEIGHTS_NAME,
     TRAINING_ARGS_NAME,
     WEIGHTS_NAME,
-    PeftModel,
     is_peft_available,
     unwrap_model,
 )
