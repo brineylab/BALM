@@ -39,7 +39,7 @@ TRAINING_ARGS_NAME = "training_args.bin"  # matches 🤗 nomenclature
 
 class Trainer(HuggingFaceTrainer):
     """
-    A custom trainer class that extends the HuggingFace Trainer class.
+    A custom Trainer that extends the HuggingFace Trainer class.
 
     The only difference is a new `_save()` method that allows saving ``BalmBase`` models using
     the ``model.save_pretrained()`` method.
