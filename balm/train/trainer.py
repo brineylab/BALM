@@ -30,15 +30,11 @@ import torch
 from peft import PeftModel
 from transformers import PreTrainedModel
 from transformers import Trainer as HuggingFaceTrainer
-from transformers.trainer import (
-    SAFE_WEIGHTS_NAME,
-    TRAINING_ARGS_NAME,
-    WEIGHTS_NAME,
-    is_peft_available,
-    unwrap_model,
-)
+from transformers.trainer import is_peft_available
 
-from ..models.base import BalmBase
+from ..models.base import SAFE_WEIGHTS_NAME, WEIGHTS_NAME, BalmBase, unwrap_model
+
+TRAINING_ARGS_NAME = "training_args.bin"
 
 
 class Trainer(HuggingFaceTrainer):
@@ -51,7 +47,7 @@ class Trainer(HuggingFaceTrainer):
         supported_classes = (
             (PreTrainedModel, BalmBase)  # in 🤗 Trainer, this is (PreTrainedModel,)
             if not is_peft_available()
-            else (PreTrainedModel, PeftModel)
+            else (PreTrainedModel, PeftModel, BalmBase)  # (PreTrainedModel, PeftModel)
         )
         # Save a trained model and configuration using `save_pretrained()`.
         # They can then be reloaded using `from_pretrained()`
