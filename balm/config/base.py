@@ -27,6 +27,9 @@ from typing import Optional
 
 
 class BaseConfig:
+    def to_dict(self):
+        return self.__dict__
+
     def to_json(self, output: Optional[str] = None):
         """
         Save the config to a JSON file.
@@ -37,7 +40,7 @@ class BaseConfig:
             The path to the JSON file to save the config to.
             If None, the config is returned as a JSON string.
         """
-        json_string = json.dumps(self.__dict__)
+        json_string = json.dumps(self.to_dict())
         if output is not None:
             with open(output, "w") as f:
                 f.write(json_string)
