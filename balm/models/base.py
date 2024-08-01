@@ -27,10 +27,14 @@ import os
 import re
 from typing import Any, Dict, Optional, Tuple, Union
 
+# import safetensors
 import torch
 import torch.nn as nn
 
 from ..config import BaseConfig
+
+WEIGHTS_NAME = "model.pt"
+SAFE_WEIGHTS_NAME = "model.safetensors"
 
 
 class BalmBase(nn.Module):
@@ -42,9 +46,70 @@ class BalmBase(nn.Module):
         super().__init__()
         self.config = config
 
-    @property
-    def num_parameters(self) -> int:
-        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+    # @property
+    # def num_parameters(self) -> int:
+    #     return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+    def num_parameters(
+        self,
+        only_trainable: bool = True,
+        exclude_embeddings: bool = False,
+        human_readable: bool = False,
+    ) -> int:
+        """
+        Get number of (optionally, trainable or non-embeddings) parameters in the module.
+
+        Parameters
+        ----------
+        only_trainable : bool, optional, defaults to `False`
+            Whether or not to return only the number of trainable parameters
+
+        exclude_embeddings : bool, optional, defaults to `False`
+            Whether or not to return only the number of non-embeddings parameters
+
+        human_readable : bool, optional, defaults to `False`
+            Whether or not to return the number of parameters in a human-readable format
+
+        Returns
+        -------
+        int or str
+            The number of parameters. If `human_readable` is `True`, the number of parameters
+            will be returned as a string in a human-readable format.
+        """
+
+        if exclude_embeddings:
+            embedding_param_names = [
+                f"{name}.weight"
+                for name, module_type in self.named_modules()
+                if isinstance(module_type, nn.Embedding)
+            ]
+            total_parameters = [
+                parameter
+                for name, parameter in self.named_parameters()
+                if name not in embedding_param_names
+            ]
+        else:
+            total_parameters = list(self.parameters())
+
+        total_numel = []
+        for param in total_parameters:
+            if param.requires_grad or not only_trainable:
+                total_numel.append(param.numel())
+        total_num_params = sum(total_numel)
+
+        if human_readable:
+            if total_num_params < 1e3:
+                return total_num_params
+            elif total_num_params < 1e6:
+                return f"{total_num_params / 1e3:.2f}K"
+            elif total_num_params < 1e9:
+                return f"{total_num_params / 1e6:.2f}M"
+            elif total_num_params < 1e12:
+                return f"{total_num_params / 1e9:.2f}B"
+            else:
+                return f"{total_num_params / 1e12:.2f}T"
+        else:
+            return total_num_params
 
     def freeze_base_model(self, base_model: Optional[str] = None):
         if base_model is None:
@@ -62,7 +127,14 @@ class BalmBase(nn.Module):
         for param in base_model.parameters():
             param.requires_grad = False
 
-    def save_pretrained(self, save_directory: str, max_shard_size: str = "10GB"):
+    def save_pretrained(
+        self,
+        save_directory: str,
+        state_dict: Optional[Dict[str, torch.Tensor]] = None,
+        max_shard_size: str = "10GB",
+        # unused, present for compatibility with 🤗 Trainer
+        safe_serialization: bool = False,
+    ):
         """
         Save the model's state dict to a directory.
 
@@ -81,20 +153,21 @@ class BalmBase(nn.Module):
         # save the model config
         self.config.save_pretrained(save_directory)
 
-        # unwrap the model
-        model_to_save = unwrap_model(self)
-        state_dict = model_to_save.state_dict()
+        if state_dict is None:
+            # unwrap the model
+            model_to_save = unwrap_model(self)
+            state_dict = model_to_save.state_dict()
 
         # shard and save the model
         shards, index = self._shard_checkpoint(
-            state_dict, max_shard_size=max_shard_size
+            state_dict, max_shard_size=max_shard_size, weights_name=WEIGHTS_NAME
         )
         for shard_file, shard in shards.items():
             torch.save(shard, os.path.join(save_directory, shard_file))
 
         # save the index
         if index is not None:
-            save_index_file = os.path.join(save_directory, "model.pt.index.json")
+            save_index_file = os.path.join(save_directory, f"{WEIGHTS_NAME}.index.json")
             with open(save_index_file, "w", encoding="utf-8") as f:
                 content = json.dumps(index, indent=2, sort_keys=True) + "\n"
                 f.write(content)
@@ -103,25 +176,30 @@ class BalmBase(nn.Module):
     def from_pretrained(
         cls,
         model_path: str,
-        *model_args,
+        weights_name: str = WEIGHTS_NAME,
         config: Optional[Union[str, BaseConfig, dict]] = None,
+        **config_kwargs,
     ):
         """
         Load a pretrained model.
 
         Parameters
         ----------
-        model_path : str
+        model_path : str, defaults to "model.pt"
             The path to a diretory containing the pretrained model.
-            Model file should be named ``"model.pt"``.
+            the default model file should is ``"model.pt"``.
 
-        model_args : tuple, optional
-            Additional arguments that will be passed directly to the model's __init__ method.
+        weights_name : str, optional, defaults to "model.pt"
+            The name of the model file.
 
         config : Optional[Union[str, BaseConfig, dict]], optional
             Alternate configuration object or path to an alternate configuration file.
             If not provided, the configuration (``config.json``) will be loaded from the
             model directory.
+
+        config_kwargs : dict, optional
+            Additional keyword arguments that will be set in the model's config (and will
+            override any values already set in the saved config file).
 
         Returns
         -------
@@ -132,14 +210,21 @@ class BalmBase(nn.Module):
         if config is None:
             config = os.path.join(model_path, "config.json")
         config = cls.config_class.from_pretrained(config)
+        # extra config kwargs
+        for kw, val in config_kwargs.items():
+            setattr(config, kw, val)
 
         # model
-        model_path = os.path.join(model_path, "model.pt")
+        model_path = os.path.join(model_path, weights_name)
         if not os.path.exists(model_path):
-            raise FileNotFoundError(
-                f"Model file (model.pt) not found in the supplied model directory: {model_path}"
-            )
-        model = cls(config=config, *model_args)
+            err = f"Model file ({weights_name}) not found in the supplied model directory: {model_path}"
+            err += "\n"
+            err += "The supplied directory contains the following files:\n  - "
+            err += "\n  - ".join(os.listdir(model_path))
+            err += "\n"
+            err += "If one of these files is your weights file, make sure to pass the correct filename to the `weights_name` argument."
+            raise FileNotFoundError(err)
+        model = cls(config=config)
         state_dict_to_load = torch.load(model_path)
         # if state_dict keys start with "module.", the model wasn't unwrapped before saving
         # and the keys won't match the madel we're trying to load into
@@ -179,13 +264,16 @@ class BalmBase(nn.Module):
                 f" was trained on, you can already use {model.__class__.__name__} for predictions without further"
                 " training."
             )
-        return model
+
+        # models are often saved in eval mode, so we set them back to train mode
+        # otherwise, all parameters may have requires_grad=False and the model won't train
+        return model.train()
 
     def _shard_checkpoint(
         self,
         state_dict: Dict[str, torch.Tensor],
         max_shard_size: Union[int, str] = "10GB",
-        weights_name: str = "model.pt",
+        weights_name: str = WEIGHTS_NAME,
     ) -> Tuple[Dict[str, torch.Tensor], Optional[Dict[str, Any]]]:
         """
         Splits a model state dictionary in sub-checkpoints so that the final size of each sub-checkpoint does not exceed a
