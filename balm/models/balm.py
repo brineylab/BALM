@@ -48,9 +48,10 @@ class BalmModel(BalmBase):
     Baseline Antibody Language Model (BALM)
 
     Parameters
-        ----------
-        config : BalmConfig
+    ----------
+    config : BalmConfig
             The configuration object defining model architecture and hyperparameters.
+
     """
 
     config_class = BalmConfig
@@ -96,7 +97,6 @@ class BalmModel(BalmBase):
         x: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         key_padding_mask: Optional[torch.Tensor] = None,
-        # need_weights: bool = False,
         output_attentions: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
@@ -156,11 +156,6 @@ class BalmModel(BalmBase):
             hidden_states=all_hidden_states,
             attentions=all_self_attentions,
         )
-
-        # # old output
-        # if need_weights:
-        #     return x, attn
-        # return x
 
 
 class BalmForMaskedLM(BalmBase):
@@ -270,11 +265,6 @@ class BalmForMaskedLM(BalmBase):
                 logits.view(-1, self.config.vocab_size),
                 labels.view(-1),
             )
-            # # old version, which should be equivalent to the above
-            # masked_lm_loss = self.criterion(
-            #     logits.view(-1, logits.size(-1)),
-            #     labels.view(-1),
-            # )
 
         # outputs
         if not return_dict:
@@ -289,27 +279,6 @@ class BalmForMaskedLM(BalmBase):
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
-
-        # output = MaskedLMOutput(
-        #     logits=logits,
-        #     loss=masked_lm_loss,
-        # )
-        # if output_attentions:
-        #     output.attentions = attn
-        # if output_hidden_states:
-        #     output.hidden_states = x
-        # # tuple output
-        # if not return_dict:
-        #     outputs = logits
-        #     if output_hidden_states:
-        #         outputs += (x,)
-        #     if output_attentions:
-        #         outputs += (attn,)
-        #     return (
-        #         ((masked_lm_loss,) + outputs) if masked_lm_loss is not None else outputs
-        #     )
-        # # dict output
-        # return output
 
 
 class BalmForSequenceClassification(BalmBase):
@@ -345,14 +314,14 @@ class BalmForSequenceClassification(BalmBase):
             if self.config.classifier_activation is not None
             else "tanh"
         )
-        # classifier_dropout = self.config.dropout
-        # classifier_activation = "tanh"
         self.classifier = BalmSequenceClassificationHead(
             embed_dim=self.config.embed_dim,
             num_labels=self.config.num_labels,
             dropout=classifier_dropout,
             activation=classifier_activation,
         )
+
+        # loss function
         self.criterion = nn.CrossEntropyLoss(ignore_index=-100)
 
     def forward(
@@ -445,15 +414,3 @@ class BalmForSequenceClassification(BalmBase):
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
-
-        # output = ClassifierOutput(
-        #     logits=logits,
-        #     loss=classifier_loss,
-        # )
-        # if output_attentions:
-        #     output.attentions = attn
-        # if output_hidden_states:
-        #     output.hidden_states = x
-        # if return_dict:
-        #     return output.as_dict()
-        # return output.as_tuple()
