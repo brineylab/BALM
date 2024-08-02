@@ -32,7 +32,6 @@ class BalmConfig(BaseConfig):
         ffn_dim: int = 1280,
         num_layers: int = 6,
         num_heads: int = 20,
-        num_experts: int = 8,
         max_length: int = 320,
         vocab_size: int = 32,
         dropout: float = 0.1,
@@ -113,7 +112,6 @@ class BalmConfig(BaseConfig):
         self.ffn_dim = int(ffn_dim)
         self.num_layers = int(num_layers)
         self.num_heads = int(num_heads)
-        self.num_experts = int(num_experts)
         self.max_length = int(max_length)
         self.vocab_size = int(vocab_size)
         self.dropout = float(dropout)
