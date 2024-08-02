@@ -935,13 +935,17 @@ class SparseTransformerLayer(nn.Module):
             x = self.norm2(residual + x)
 
         # outputs
-        if output_router_logits and router_tuple is not None:
-            if need_weights:
-                return (x, attn, router_tuple)
-            return (x, router_tuple)
         if need_weights:
-            return (x, attn)
-        return x
+            return (x, attn, router_tuple)
+        return (x, router_tuple)
+
+        # if output_router_logits and router_tuple is not None:
+        #     if need_weights:
+        #         return (x, attn, router_tuple)
+        #     return (x, router_tuple)
+        # if need_weights:
+        #     return (x, attn)
+        # return x
 
 
 # class SparseTransformerLayer(nn.Module):
