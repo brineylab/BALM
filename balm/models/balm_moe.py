@@ -31,12 +31,10 @@ from ..loss import router_load_balancing_loss, router_z_loss
 from ..modules import (
     BalmLMHead,
     BalmSequenceClassificationHead,
-    ClassifierOutput,
     DenseTransformerLayer,
-    # MaskedLMOutput,
     SparseTransformerLayer,
 )
-from ..outputs import MaskedLMOutput, SequenceClassifierOutput
+from ..outputs import MoEMaskedLMOutput, MoEModelOutput, MoESequenceClassifierOutput
 from .base import BalmBase
 
 __all__ = [
@@ -64,13 +62,18 @@ class BalmMoEModel(BalmBase):
     ):
         super().__init__(config)
         self.alternate_sparsity = self.config.alternate_sparsity
+
+        # embedding
         self.embed_tokens = nn.Embedding(
             self.config.vocab_size,
             self.config.embed_dim,
             padding_idx=self.config.padding_idx,
         )
+        self.embedding_dropout = nn.Dropout(self.config.token_embedding_dropout)
 
+        # layers
         if self.config.alternate_sparsity:
+            # alternate dense/sparse layers
             layers = []
             for layer_num in range(self.config.num_layers):
                 if layer_num % 2 == 0:
@@ -116,8 +119,8 @@ class BalmMoEModel(BalmBase):
                         )
                     )
             self.layers = nn.ModuleList(layers)
-
         else:
+            # all sparse layers
             self.layers = nn.ModuleList(
                 [
                     SparseTransformerLayer(
@@ -146,7 +149,8 @@ class BalmMoEModel(BalmBase):
                     for _ in range(self.config.num_layers)
                 ]
             )
-        self.embedding_dropout = nn.Dropout(self.config.token_embedding_dropout)
+
+        # final layer norm
         self.final_norm = nn.LayerNorm(self.config.embed_dim)
 
     def forward(
@@ -154,12 +158,12 @@ class BalmMoEModel(BalmBase):
         x: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         key_padding_mask: Optional[torch.Tensor] = None,
-        need_weights: bool = False,
+        output_attentions: bool = False,
         output_hidden_states: bool = False,
         output_router_logits: bool = False,
         output_expert_indexes: bool = False,
         return_dict: bool = True,
-    ) -> Union[MaskedLMOutput, tuple]:
+    ) -> Union[MoEMaskedLMOutput, tuple]:
         """
         Parameters:
         -----------
@@ -170,6 +174,9 @@ class BalmMoEModel(BalmBase):
         attention_mask: torch.BoolTensor
             Attention mask
 
+        key_padding_mask: torch.BoolTensor
+            Key padding mask
+
         output_attentions: bool
             Whether to output attention weights
 
@@ -179,6 +186,9 @@ class BalmMoEModel(BalmBase):
         output_router_logits: bool
             Whether to output router logits
 
+        output_expert_indexes: bool
+            Whether to output expert indexes
+
         return_dict: bool
             Whether to return a dictionary of outputs (returns a tuple if False)
 
@@ -186,64 +196,77 @@ class BalmMoEModel(BalmBase):
         Returns:
         --------
         output (tuple or dict):
-            If `return_dict` is ``True``, the output is a ``MaskedLMOutput`` object:
+            If `return_dict` is ``True``, the output is a ``MoEMaskedLMOutput`` object:
                 - last_hidden_state (torch.FloatTensor): last hidden state
-                - router_z_loss (torch.FloatTensor): router z loss
-                - router_aux_loss (torch.FloatTensor): router auxiliary loss
-                - attentions (torch.FloatTensor): attention weights
+                - z_loss (torch.FloatTensor): router z loss
+                - aux_loss (torch.FloatTensor): router auxiliary loss
                 - hidden_states (torch.FloatTensor): hidden states
+                - attentions (torch.FloatTensor): attention weights
                 - router_logits (torch.FloatTensor): router logits
+                - expert_indexes (torch.LongTensor): expert indexes
+
             If `return_dict` is ``False``, the output is a ``tuple`` with the f0llowing elements:
                 - last_hidden_state (torch.FloatTensor): last hidden state
-                - attentions (torch.FloatTensor): attention weights
+                - z_loss (torch.FloatTensor): router z loss
+                - aux_loss (torch.FloatTensor): router auxiliary loss
                 - hidden_states (torch.FloatTensor): hidden states
+                - attentions (torch.FloatTensor): attention weights
                 - router_logits (torch.FloatTensor): router logits
+                - expert_indexes (torch.LongTensor): expert indexes
+
+            For attentions, hidden_states, router_logits, and expert_indexes, if they are not output, the corresponding
+            value will be ``None`` (for ``MoEMaskedLMOutput``) or not returned at all (for ``tuple``).
 
         """
         # init
-        attn_weights = []
-        hidden_states = {}
-        router_logits = []
-        expert_indexes = []
+        all_self_attentions = () if output_attentions else None
+        all_hidden_states = () if output_hidden_states else None
+        router_logits = ()
+        expert_indexes = ()
 
         # embeddings
         x = self.embed_tokens(x)
 
         # layers
         for layer_idx, layer in enumerate(self.layers, 1):
+            if output_hidden_states:
+                all_hidden_states = all_hidden_states + (x,)
+
             if layer_idx % 2 == 0 or not self.alternate_sparsity:
                 # sparse layer, so we need to collect router/expert info
                 x = layer(
                     x,
                     attention_mask=attention_mask,
                     key_padding_mask=key_padding_mask,
-                    need_weights=need_weights,
+                    need_weights=output_attentions,
                     output_router_logits=output_router_logits,
                 )
-                if need_weights:
+                if output_attentions:
                     x, attn, router_tuple = x
-                    attn_weights.append(attn)
+                    all_self_attentions.append(attn)
                 else:
                     x, router_tuple = x
-                router_logits.append(router_tuple[0])
-                expert_indexes.append(router_tuple[1])
-                if output_hidden_states:
-                    hidden_states[layer_idx] = x
+
+                router_logits = router_logits + (router_tuple[0],)
+                expert_indexes = expert_indexes + (router_tuple[1],)
             else:
                 # dense layer, no router info needed
                 x = layer(
                     x,
                     attention_mask=attention_mask,
-                    need_weights=need_weights,
+                    need_weights=output_attentions,
                 )
-                if need_weights:
+                if output_attentions:
                     x, attn = x
-                    attn_weights.append(attn)
-                if output_hidden_states:
-                    hidden_states[layer_idx] = x
+                    all_self_attentions = all_self_attentions + (attn,)
 
+        # final layer norm
         if self.config.pre_norm:
             x = self.final_norm(x)
+
+        # save the last hidden state
+        if output_hidden_states:
+            all_hidden_states = all_hidden_states + (x,)
 
         # router losses
         cat_router_logits = torch.cat(router_logits, dim=1)
@@ -255,26 +278,52 @@ class BalmMoEModel(BalmBase):
         else:
             aux_loss = router_load_balancing_loss(router_probs, cat_expert_indexes)
 
-        # results
-        result = MaskedLMOutput(
+        # outputs
+        if not return_dict:
+            return tuple(
+                v
+                for v in [
+                    x,
+                    z_loss,
+                    aux_loss,
+                    all_hidden_states,
+                    all_self_attentions,
+                    router_logits if output_router_logits else None,
+                    expert_indexes if output_expert_indexes else None,
+                ]
+                if v is not None
+            )
+
+        return MoEModelOutput(
             last_hidden_state=x,
-            router_z_loss=z_loss,
-            router_aux_loss=aux_loss,
+            z_loss=z_loss,
+            aux_loss=aux_loss,
+            hidden_states=all_hidden_states,
+            attentions=all_self_attentions,
+            router_logits=router_logits if output_router_logits else None,
+            expert_indexes=expert_indexes if output_expert_indexes else None,
         )
-        if need_weights:
-            # attentions: B x L x H x T x T
-            attentions = torch.stack(attn_weights, 1)
-            attentions = attentions * attention_mask[:, None, None, :, :]
-            result["attentions"] = attentions
-        if output_hidden_states:
-            result["hidden_states"] = hidden_states
-        if output_router_logits:
-            result["router_logits"] = cat_router_logits
-        if output_expert_indexes:
-            result["expert_indexes"] = cat_expert_indexes
-        if return_dict:
-            return result
-        return result.as_tuple()
+
+        # # results
+        # result = MaskedLMOutput(
+        #     last_hidden_state=x,
+        #     router_z_loss=z_loss,
+        #     router_aux_loss=aux_loss,
+        # )
+        # if need_weights:
+        #     # attentions: B x L x H x T x T
+        #     attentions = torch.stack(attn_weights, 1)
+        #     attentions = attentions * attention_mask[:, None, None, :, :]
+        #     result["attentions"] = attentions
+        # if output_hidden_states:
+        #     result["hidden_states"] = hidden_states
+        # if output_router_logits:
+        #     result["router_logits"] = cat_router_logits
+        # if output_expert_indexes:
+        #     result["expert_indexes"] = cat_expert_indexes
+        # if return_dict:
+        #     return result
+        # return result.as_tuple()
 
 
 class BalmMoEForMaskedLM(BalmBase):
@@ -295,17 +344,21 @@ class BalmMoEForMaskedLM(BalmBase):
         config: BalmMoEConfig,
     ):
         super().__init__(config)
-        self.balm = BalmMoEModel(
-            config=self.config,
-        )
+        # model
+        self.balm = BalmMoEModel(config=self.config)
+
+        # LM head
         self.lm_head = BalmLMHead(
             embed_dim=self.config.embed_dim,
             output_dim=self.config.vocab_size,
         )
 
+        # loss function
         self.criterion = nn.CrossEntropyLoss(ignore_index=-100)
-        self.router_z_loss_coef = self.config.router_z_loss_coef
-        self.router_aux_loss_coef = self.config.router_aux_loss_coef
+
+        # router loss coefficients
+        self.z_loss_coef = self.config.router_z_loss_coef
+        self.aux_loss_coef = self.config.router_aux_loss_coef
 
     def forward(
         self,
@@ -315,10 +368,10 @@ class BalmMoEForMaskedLM(BalmBase):
         labels: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
         output_hidden_states: bool = False,
-        output_router_logits: bool = True,
+        output_router_logits: bool = False,
         output_expert_indexes: bool = False,
         return_dict: bool = True,
-    ) -> Union[dict, tuple]:
+    ) -> Union[MoEMaskedLMOutput, tuple]:
         """
         Forward pass
 
@@ -350,6 +403,7 @@ class BalmMoEForMaskedLM(BalmBase):
 
         return_dict: bool
             Whether to return a dictionary of outputs (returns a tuple if False)
+
         """
         # encoder
         outputs = self.balm(
@@ -362,37 +416,63 @@ class BalmMoEForMaskedLM(BalmBase):
             output_expert_indexes=output_expert_indexes,
             return_dict=True,
         )
-        x = outputs["last_hidden_state"]
-        router_z_loss = outputs["router_z_loss"]
-        router_aux_loss = outputs["router_aux_loss"]
+        x = outputs.last_hidden_state
+        raw_z_loss = outputs.z_loss
+        raw_aux_loss = outputs.aux_loss
 
         # LM head
         lm_logits = self.lm_head(x)
-        outputs["logits"] = lm_logits
 
         # loss
+        lm_loss = None
         if labels is not None:
+            # LM loss
             labels = labels.to(lm_logits.device)
             loss = self.criterion(
-                lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1)
+                lm_logits.view(-1, self.config.vocab_size), labels.view(-1)
             )
-            outputs["lm_loss"] = loss
+            lm_loss = loss
 
-            if output_router_logits:
-                z_loss = self.router_z_loss_coef * (router_z_loss)
-                outputs["router_z_loss"] = z_loss
-                if self.config.expert_choice_router:
-                    loss = loss + z_loss
-                else:
-                    aux_loss = self.router_aux_loss_coef * (router_aux_loss)
-                    outputs["router_aux_loss"] = aux_loss
-                    loss = loss + z_loss + aux_loss
-            outputs["loss"] = loss
+            # router loss(es)
+            z_loss = self.z_loss_coef * (raw_z_loss)
+            if self.config.expert_choice_router:
+                loss = loss + z_loss
+            else:
+                aux_loss = self.aux_loss_coef * (raw_aux_loss)
+                loss = loss + z_loss + aux_loss
 
         # outputs
-        if return_dict:
-            return outputs.as_dict()
-        return outputs.as_tuple()
+        if not return_dict:
+            return tuple(
+                v
+                for v in [
+                    loss,
+                    z_loss,
+                    aux_loss,
+                    lm_loss,
+                    outputs.hidden_states,
+                    outputs.attentions,
+                    outputs.router_logits,
+                    outputs.expert_indexes,
+                ]
+                if v is not None
+            )
+
+        return MoEMaskedLMOutput(
+            loss=loss,
+            z_loss=z_loss,
+            aux_loss=aux_loss,
+            lm_loss=lm_loss,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+            router_logits=outputs.router_logits,
+            expert_indexes=outputs.expert_indexes,
+        )
+
+        # # outputs
+        # if return_dict:
+        #     return outputs.as_dict()
+        # return outputs.as_tuple()
 
 
 class BalmMoEForSequenceClassification(BalmBase):
@@ -428,58 +508,148 @@ class BalmMoEForSequenceClassification(BalmBase):
             if self.config.classifier_activation is not None
             else "tanh"
         )
-        # classifier_dropout = self.config.dropout
-        # classifier_activation = "tanh"
         self.classifier = BalmSequenceClassificationHead(
             embed_dim=self.config.embed_dim,
             num_labels=self.config.num_labels,
             dropout=classifier_dropout,
             activation=classifier_activation,
         )
+
+        # loss function
         self.criterion = nn.CrossEntropyLoss()
+
+        # router loss coefficients
+        self.z_loss_coef = self.config.router_z_loss_coef
+        self.aux_loss_coef = self.config.router_aux_loss_coef
 
     def forward(
         self,
         input_ids: torch.Tensor,
-        labels: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         key_padding_mask: Optional[torch.Tensor] = None,
-        need_weights: bool = False,
+        labels: Optional[torch.Tensor] = None,
+        output_attentions: bool = False,
         output_hidden_states: bool = False,
+        output_router_logits: bool = False,
+        output_expert_indexes: bool = False,
         return_dict: bool = True,
-    ) -> MaskedLMOutput:
+    ) -> Union[MoESequenceClassifierOutput, tuple]:
         """
+        Forward pass
+
         Parameters
         ----------
+        input_ids: torch.LongTensor
+            Tokenized input IDs
 
-        x : torch.Tensor
-            The input tensor. Expected shape is (batch_size, seq_len).
+        attention_mask: torch.BoolTensor
+            Attention mask
 
-        Returns
-        -------
-        torch.Tensor
-            The output tensor. The shape is (batch_size, seq_len, vocab_size).
+        key_padding_mask: torch.BoolTensor
+            Key padding mask
+
+        labels: torch.LongTensor
+            Labels
+
+        output_attentions: bool
+            Whether to output attention weights
+
+        output_hidden_states: bool
+            Whether to output hidden states
+
+        output_router_logits: bool
+            Whether to output router logits
+
+        output_expert_indexes: bool
+            Whether to output expert indexes
+
+        return_dict: bool
+            Whether to return a dictionary of outputs (returns a tuple if False)
         """
 
+        # encoder
         outputs = self.balm(
             input_ids,
             attention_mask=attention_mask,
             key_padding_mask=key_padding_mask,
-            need_weights=need_weights,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            output_router_logits=output_router_logits,
+            output_expert_indexes=output_expert_indexes,
+            return_dict=True,
         )
-        x = outputs["last_hidden_state"]
+        x = outputs.last_hidden_state
+        raw_z_loss = outputs.z_loss
+        raw_aux_loss = outputs.aux_loss
 
+        # classifier
         classifier_logits = self.classifier(x)
         outputs["logits"] = classifier_logits
 
+        # classification loss
+        classifier_loss = None
         if labels is not None:
             labels = labels.to(classifier_logits.device)
-            loss = self.criterion(classifier_logits, labels)
-            outputs["loss"] = loss
+            classifier_loss = self.criterion(
+                classifier_logits.view(-1, self.config.num_labels),
+                labels.view(-1),
+            )
 
-        if return_dict:
-            return outputs.as_dict()
-        return outputs.as_tuple()
+            # router loss(es)
+            z_loss = self.z_loss_coef * (raw_z_loss)
+            if self.config.expert_choice_router:
+                loss = classifier_loss + z_loss
+            else:
+                aux_loss = self.aux_loss_coef * (raw_aux_loss)
+                loss = classifier_loss + z_loss + aux_loss
+
+        # outputs
+        if not return_dict:
+            return tuple(
+                v
+                for v in [
+                    loss,
+                    z_loss,
+                    aux_loss,
+                    classifier_loss,
+                    outputs.hidden_states,
+                    outputs.attentions,
+                    outputs.router_logits,
+                    outputs.expert_indexes,
+                ]
+                if v is not None
+            )
+
+        return MoESequenceClassifierOutput(
+            loss=loss,
+            z_loss=z_loss,
+            aux_loss=aux_loss,
+            classifier_loss=classifier_loss,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+            router_logits=outputs.router_logits,
+            expert_indexes=outputs.expert_indexes,
+        )
+
+        # outputs = self.balm(
+        #     input_ids,
+        #     attention_mask=attention_mask,
+        #     key_padding_mask=key_padding_mask,
+        #     need_weights=need_weights,
+        # )
+        # x = outputs["last_hidden_state"]
+
+        # classifier_logits = self.classifier(x)
+        # outputs["logits"] = classifier_logits
+
+        # if labels is not None:
+        #     labels = labels.to(classifier_logits.device)
+        #     loss = self.criterion(classifier_logits, labels)
+        #     outputs["loss"] = loss
+
+        # if return_dict:
+        #     return outputs.as_dict()
+        # return outputs.as_tuple()
 
         # x = self.balm(
         #     input_ids,
