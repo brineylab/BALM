@@ -22,89 +22,89 @@ __all__ = [
     # heads
     "BalmLMHead",
     "BalmSequenceClassificationHead",
-    # outputs
-    "MaskedLMOutput",
-    "ClassifierOutput",
+    # # outputs
+    # "MaskedLMOutput",
+    # "ClassifierOutput",
 ]
 
 
-class OutputBase:
-    def __getitem__(self, idx):
-        if isinstance(idx, str) and hasattr(self, idx):
-            return getattr(self, idx)
-        return self.logits[idx]
+# class OutputBase:
+#     def __getitem__(self, idx):
+#         if isinstance(idx, str) and hasattr(self, idx):
+#             return getattr(self, idx)
+#         return self.logits[idx]
 
-    def __setitem__(self, idx, value):
-        if isinstance(idx, str):
-            setattr(self, idx, value)
-        else:
-            raise ValueError(f"Invalid key: {idx}. Keys must be strings.")
+#     def __setitem__(self, idx, value):
+#         if isinstance(idx, str):
+#             setattr(self, idx, value)
+#         else:
+#             raise ValueError(f"Invalid key: {idx}. Keys must be strings.")
 
-    def as_tuple(self):
-        output_attrs = [
-            self.last_hidden_state,
-            self.attentions,
-            self.hidden_states,
-            self.router_logits,
-        ]
-        return tuple([o for o in output_attrs if o is not None])
+#     def as_tuple(self):
+#         output_attrs = [
+#             self.last_hidden_state,
+#             self.attentions,
+#             self.hidden_states,
+#             self.router_logits,
+#         ]
+#         return tuple([o for o in output_attrs if o is not None])
 
-    def as_dict(self):
-        return {k: v for k, v in self.__dict__.items() if v is not None}
-
-
-class MaskedLMOutput(OutputBase):
-    def __init__(
-        self,
-        logits: Optional[torch.Tensor] = None,
-        loss: Optional[torch.Tensor] = None,
-        hidden_states: Optional[torch.Tensor] = None,
-        attentions: Optional[torch.Tensor] = None,
-        last_hidden_state: Optional[torch.Tensor] = None,
-        lm_loss: Optional[torch.Tensor] = None,
-        router_logits: Optional[torch.Tensor] = None,
-        router_z_loss: Optional[torch.Tensor] = None,
-        router_aux_loss: Optional[torch.Tensor] = None,
-        expert_indices: Optional[torch.Tensor] = None,
-    ):
-        super().__init__()
-        self.logits = logits
-        self.loss = loss
-        self.hidden_states = hidden_states
-        self.attentions = attentions
-        self.last_hidden_state = last_hidden_state
-        self.lm_loss = lm_loss
-        self.router_logits = router_logits
-        self.router_z_loss = router_z_loss
-        self.router_aux_loss = router_aux_loss
-        self.expert_indices = expert_indices
+#     def as_dict(self):
+#         return {k: v for k, v in self.__dict__.items() if v is not None}
 
 
-class ClassifierOutput:
-    def __init__(
-        self,
-        logits: Optional[torch.Tensor] = None,
-        loss: Optional[torch.Tensor] = None,
-        hidden_states: Optional[torch.Tensor] = None,
-        attentions: Optional[torch.Tensor] = None,
-        last_hidden_state: Optional[torch.Tensor] = None,
-        classifier_loss: Optional[torch.Tensor] = None,
-        router_logits: Optional[torch.Tensor] = None,
-        router_z_loss: Optional[torch.Tensor] = None,
-        router_aux_loss: Optional[torch.Tensor] = None,
-        expert_indices: Optional[torch.Tensor] = None,
-    ):
-        super().__init__()
-        self.logits = logits
-        self.loss = loss
-        self.hidden_states = hidden_states
-        self.attentions = attentions
-        self.last_hidden_state = last_hidden_state
-        self.classifier_loss = classifier_loss
-        self.router_logits = router_logits
-        self.router_z_loss = router_z_loss
-        self.router_aux_loss = router_aux_loss
-        self.expert_indices = expert_indices
+# class MaskedLMOutput(OutputBase):
+#     def __init__(
+#         self,
+#         logits: Optional[torch.Tensor] = None,
+#         loss: Optional[torch.Tensor] = None,
+#         hidden_states: Optional[torch.Tensor] = None,
+#         attentions: Optional[torch.Tensor] = None,
+#         last_hidden_state: Optional[torch.Tensor] = None,
+#         lm_loss: Optional[torch.Tensor] = None,
+#         router_logits: Optional[torch.Tensor] = None,
+#         router_z_loss: Optional[torch.Tensor] = None,
+#         router_aux_loss: Optional[torch.Tensor] = None,
+#         expert_indices: Optional[torch.Tensor] = None,
+#     ):
+#         super().__init__()
+#         self.logits = logits
+#         self.loss = loss
+#         self.hidden_states = hidden_states
+#         self.attentions = attentions
+#         self.last_hidden_state = last_hidden_state
+#         self.lm_loss = lm_loss
+#         self.router_logits = router_logits
+#         self.router_z_loss = router_z_loss
+#         self.router_aux_loss = router_aux_loss
+#         self.expert_indices = expert_indices
+
+
+# class ClassifierOutput:
+#     def __init__(
+#         self,
+#         logits: Optional[torch.Tensor] = None,
+#         loss: Optional[torch.Tensor] = None,
+#         hidden_states: Optional[torch.Tensor] = None,
+#         attentions: Optional[torch.Tensor] = None,
+#         last_hidden_state: Optional[torch.Tensor] = None,
+#         classifier_loss: Optional[torch.Tensor] = None,
+#         router_logits: Optional[torch.Tensor] = None,
+#         router_z_loss: Optional[torch.Tensor] = None,
+#         router_aux_loss: Optional[torch.Tensor] = None,
+#         expert_indices: Optional[torch.Tensor] = None,
+#     ):
+#         super().__init__()
+#         self.logits = logits
+#         self.loss = loss
+#         self.hidden_states = hidden_states
+#         self.attentions = attentions
+#         self.last_hidden_state = last_hidden_state
+#         self.classifier_loss = classifier_loss
+#         self.router_logits = router_logits
+#         self.router_z_loss = router_z_loss
+#         self.router_aux_loss = router_aux_loss
+#         self.expert_indices = expert_indices
 
 
 class DenseTransformerLayer(nn.Module):

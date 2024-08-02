@@ -17,20 +17,17 @@ class BaseModelOutput(ModelOutput):
     """
     Base class for model's outputs, with potential hidden states and attentions.
 
-    Args:
-        last_hidden_state (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`):
-            Sequence of hidden-states at the output of the last layer of the model.
-        hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
-            Tuple of `torch.FloatTensor` (one for the output of the embeddings, if the model has an embedding layer, +
-            one for the output of each layer) of shape `(batch_size, sequence_length, hidden_size)`.
+    Parameters
+    ----------
+    last_hidden_state : torch.FloatTensor
+        The last hidden state tensor. The shape is (batch_size, sequence_length, hidden_size).
 
-            Hidden-states of the model at the output of each layer plus the optional initial embedding outputs.
-        attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
-            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
-            sequence_length)`.
+    hidden_states : Optional[Tuple[torch.FloatTensor, ...]]
+        The hidden states tensor. The shape is (batch_size, sequence_length, hidden_size).
 
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
-            heads.
+    attentions : Optional[Tuple[torch.FloatTensor, ...]]
+        The attention weights tensor. The shape is (batch_size, num_heads, sequence_length, sequence_length).
+
     """
 
     last_hidden_state: torch.FloatTensor = None
@@ -41,6 +38,8 @@ class BaseModelOutput(ModelOutput):
 @dataclass
 class MaskedLMOutput(ModelOutput):
     """
+    Base class for outputs of masked language models.
+
     Parameters
     ----------
     logits : torch.Tensor
@@ -54,6 +53,7 @@ class MaskedLMOutput(ModelOutput):
 
     attentions : Optional[Tuple[torch.FloatTensor, ...]]
         The attention weights tensor. The shape is (batch_size, num_heads, sequence_length, sequence_length).
+
     """
 
     loss: Optional[torch.FloatTensor] = None
@@ -65,27 +65,157 @@ class MaskedLMOutput(ModelOutput):
 @dataclass
 class SequenceClassifierOutput(ModelOutput):
     """
-    Base class for outputs of sentence classification models.
+    Base class for outputs of sequence classification models.
 
-    Args:
-        loss (`torch.FloatTensor` of shape `(1,)`, *optional*, returned when `labels` is provided):
-            Classification (or regression if config.num_labels==1) loss.
-        logits (`torch.FloatTensor` of shape `(batch_size, config.num_labels)`):
-            Classification (or regression if config.num_labels==1) scores (before SoftMax).
-        hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
-            Tuple of `torch.FloatTensor` (one for the output of the embeddings, if the model has an embedding layer, +
-            one for the output of each layer) of shape `(batch_size, sequence_length, hidden_size)`.
+    Parameters
+    ----------
+    loss : torch.Tensor
+        The loss tensor. The shape is (1,).
 
-            Hidden-states of the model at the output of each layer plus the optional initial embedding outputs.
-        attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
-            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
-            sequence_length)`.
+    logits : torch.Tensor
+        The output tensor. The shape is (batch_size, config.num_labels).
 
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
-            heads.
+    hidden_states : Optional[Tuple[torch.FloatTensor, ...]]
+        The hidden states tensor. The shape is (batch_size, sequence_length, hidden_size).
+
+    attentions : Optional[Tuple[torch.FloatTensor, ...]]
+        The attention weights tensor. The shape is (batch_size, num_heads, sequence_length, sequence_length).
     """
 
     loss: Optional[torch.FloatTensor] = None
     logits: torch.FloatTensor = None
     hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
     attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
+
+
+@dataclass
+class MoEModelOutput(ModelOutput):
+    """
+    Base class for MoE model outputs, with potential hidden states and attentions.
+
+    Parameters
+    ----------
+    last_hidden_state : torch.FloatTensor
+        The last hidden state tensor. The shape is (batch_size, sequence_length, hidden_size).
+
+    z_loss : torch.FloatTensor
+        The z loss tensor. The shape is (1,).
+
+    aux_loss : torch.FloatTensor
+        The auxiliary loss tensor. The shape is (1,).
+
+    hidden_states : Optional[Tuple[torch.FloatTensor, ...]]
+        The hidden states tensor. The shape is (batch_size, sequence_length, hidden_size).
+
+    attentions : Optional[Tuple[torch.FloatTensor, ...]]
+        The attention weights tensor. The shape is (batch_size, num_heads, sequence_length, sequence_length).
+
+    router_logits : Optional[Tuple[torch.FloatTensor]]
+        The router logits tensor. The shape is (batch_size, sequence_length, num_experts).
+
+    expert_indexes : Optional[Tuple[torch.LongTensor]]
+        The expert indexes tensor. The shape is (batch_size, sequence_length, num_experts).
+
+    """
+
+    last_hidden_state: torch.FloatTensor = None
+    z_loss: torch.FloatTensor = None
+    aux_loss: torch.FloatTensor = None
+    hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
+    attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
+    router_logits: Optional[Tuple[torch.FloatTensor]] = None
+    expert_indexes: Optional[Tuple[torch.LongTensor]] = None
+
+
+@dataclass
+class MoEMaskedLMModelOutput(ModelOutput):
+    """
+    Base class for MoE model outputs, with potential hidden states and attentions.
+
+    Parameters
+    ----------
+    loss : torch.FloatTensor
+        The loss tensor. The shape is (1,).
+
+    z_loss : torch.FloatTensor
+        The z loss tensor. The shape is (1,).
+
+    aux_loss : torch.FloatTensor
+        The auxiliary loss tensor. The shape is (1,).
+
+    lm_loss : torch.FloatTensor
+        The masked language model loss tensor. The shape is (1,).
+
+    logits : torch.FloatTensor
+        The output tensor. The shape is (batch_size, sequence_length, hidden_size).
+
+    attentions : Optional[Tuple[torch.FloatTensor, ...]]
+        The attention weights tensor. The shape is (batch_size, num_heads, sequence_length, sequence_length).
+
+    hidden_states : Optional[Tuple[torch.FloatTensor, ...]]
+        The hidden states tensor. The shape is (batch_size, sequence_length, hidden_size).
+
+    router_logits : Optional[Tuple[torch.FloatTensor]]
+        The router logits tensor. The shape is (batch_size, sequence_length, num_experts).
+
+    expert_indexes : Optional[Tuple[torch.LongTensor]]
+        The expert indexes tensor. The shape is (batch_size, sequence_length, num_experts).
+
+    """
+
+    loss: Optional[torch.FloatTensor] = None
+    z_loss: torch.FloatTensor = None
+    aux_loss: torch.FloatTensor = None
+    lm_loss: torch.FloatTensor = None
+    logits: torch.FloatTensor = None
+    hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
+    attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
+    router_logits: Optional[Tuple[torch.FloatTensor]] = None
+    expert_indexes: Optional[Tuple[torch.LongTensor]] = None
+
+
+@dataclass
+class MoESequenceClassifierModelOutput(ModelOutput):
+    """
+    Base class for MoE model outputs, with potential hidden states and attentions.
+
+    Parameters
+    ----------
+    loss : torch.FloatTensor
+        The loss tensor. The shape is (1,).
+
+    logits : torch.FloatTensor
+        The output tensor. The shape is (batch_size, num_labels).
+
+    z_loss : torch.FloatTensor
+        The z loss tensor. The shape is (1,).
+
+    aux_loss : torch.FloatTensor
+        The auxiliary loss tensor. The shape is (1,).
+
+    classifier_loss : torch.FloatTensor
+        The classifier loss tensor. The shape is (1,).
+
+    hidden_states : Optional[Tuple[torch.FloatTensor, ...]]
+        The hidden states tensor. The shape is (batch_size, sequence_length, hidden_size).
+
+    attentions : Optional[Tuple[torch.FloatTensor, ...]]
+        The attention weights tensor. The shape is (batch_size, num_heads, sequence_length, sequence_length).
+
+    router_logits : Optional[Tuple[torch.FloatTensor]]
+        The router logits tensor. The shape is (batch_size, sequence_length, num_experts).
+
+    expert_indexes : Optional[Tuple[torch.LongTensor]]
+        The expert indexes tensor. The shape is (batch_size, sequence_length, num_experts).
+
+    """
+
+    loss: Optional[torch.FloatTensor] = None
+    z_loss: torch.FloatTensor = None
+    aux_loss: torch.FloatTensor = None
+    classifier_loss: torch.FloatTensor = None
+    logits: torch.FloatTensor = None
+    hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
+    attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
+    router_logits: Optional[Tuple[torch.FloatTensor]] = None
+    expert_indexes: Optional[Tuple[torch.LongTensor]] = None
