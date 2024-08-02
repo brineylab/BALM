@@ -128,7 +128,7 @@ class MoEModelOutput(ModelOutput):
 
 
 @dataclass
-class MoEMaskedLMModelOutput(ModelOutput):
+class MoEMaskedLMOutput(ModelOutput):
     """
     Base class for MoE model outputs, with potential hidden states and attentions.
 
@@ -175,7 +175,7 @@ class MoEMaskedLMModelOutput(ModelOutput):
 
 
 @dataclass
-class MoESequenceClassifierModelOutput(ModelOutput):
+class MoESequenceClassifierOutput(ModelOutput):
     """
     Base class for MoE model outputs, with potential hidden states and attentions.
 
