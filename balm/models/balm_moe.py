@@ -232,7 +232,7 @@ class BalmMoEModel(BalmBase):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (x,)
 
-            if layer_idx % 2 == 0 or not self.alternate_sparsity:
+            if isinstance(layer, SparseTransformerLayer):
                 # sparse layer, so we need to collect router/expert info
                 x = layer(
                     x,
