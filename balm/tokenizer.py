@@ -10,16 +10,11 @@ import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Dict, Iterable, List, Optional, Union
 
-import numpy as np
 import torch
 from tqdm.auto import tqdm
 
-# mp.set_start_method("spawn")
-
 __all__ = [
-    # "TokenizerBase",
     "Tokenizer",
-    # "BatchEncoding",
 ]
 
 
