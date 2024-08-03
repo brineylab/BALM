@@ -20,7 +20,7 @@ from .base import BalmBase
 __all__ = [
     "BalmHybridMoEModel",
     "BalmHybridMoEForMaskedLM",
-    # "BalmHybridMoEForSequenceClassification",
+    "BalmHybridMoEForSequenceClassification",
 ]
 
 
