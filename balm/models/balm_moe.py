@@ -46,12 +46,12 @@ __all__ = [
 
 class BalmMoEModel(BalmBase):
     """
-    BALM Mixture-of-Experts model
+    BALM Mixture-of-Experts (MoE) model.
 
     Parameters
     ----------
     config: BalmMoEConfig
-        Configuration for the model.
+        Configuration object defining model architecture and hyperparameters.
     """
 
     config_class = BalmMoEConfig
@@ -196,7 +196,7 @@ class BalmMoEModel(BalmBase):
         Returns:
         --------
         output (tuple or dict):
-            If `return_dict` is ``True``, the output is a ``MoEMaskedLMOutput`` object:
+            If `return_dict` is ``True``, the output is a ``MoEModelOutput`` object:
                 - last_hidden_state (torch.FloatTensor): last hidden state
                 - z_loss (torch.FloatTensor): router z loss
                 - aux_loss (torch.FloatTensor): router auxiliary loss
@@ -215,7 +215,7 @@ class BalmMoEModel(BalmBase):
                 - expert_indexes (torch.LongTensor): expert indexes
 
             For attentions, hidden_states, router_logits, and expert_indexes, if they are not output, the corresponding
-            value will be ``None`` (for ``MoEMaskedLMOutput``) or not returned at all (for ``tuple``).
+            value will be ``None`` (for ``MoEModelOutput``) or not returned at all (for ``tuple``).
 
         """
         # init
@@ -228,7 +228,7 @@ class BalmMoEModel(BalmBase):
         x = self.embed_tokens(x)
 
         # layers
-        for layer_idx, layer in enumerate(self.layers, 1):
+        for layer in self.layers:
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (x,)
 
@@ -239,11 +239,11 @@ class BalmMoEModel(BalmBase):
                     attention_mask=attention_mask,
                     key_padding_mask=key_padding_mask,
                     need_weights=output_attentions,
-                    output_router_logits=output_router_logits,
+                    # output_router_logits=output_router_logits,
                 )
                 if output_attentions:
                     x, attn, router_tuple = x
-                    all_self_attentions.append(attn)
+                    all_self_attentions = all_self_attentions + (attn,)
                 else:
                     x, router_tuple = x
 
@@ -328,12 +328,14 @@ class BalmMoEModel(BalmBase):
 
 class BalmMoEForMaskedLM(BalmBase):
     """
-    BALM Mixture of Experts model for Masked Language Modeling.
+    BALM Mixture-of-Experts (MoE) model for masked language modeling.
+    Uses the BALM-MoE encoder and adds a masked language modeling head.
 
     Parameters
     ----------
     config: BalmMoEConfig
-        Configuration for the model.
+        Configuration object defining model architecture and hyperparameters.
+
     """
 
     config_class = BalmMoEConfig
@@ -404,6 +406,11 @@ class BalmMoEForMaskedLM(BalmBase):
         return_dict: bool
             Whether to return a dictionary of outputs (returns a tuple if False)
 
+        Returns
+        -------
+        output (tuple or dict):
+            If `return_dict` is ``True``, the output is a ``MoEMaskedLMOutput`` object
+
         """
         # encoder
         outputs = self.balm(
@@ -417,29 +424,27 @@ class BalmMoEForMaskedLM(BalmBase):
             return_dict=True,
         )
         x = outputs.last_hidden_state
-        raw_z_loss = outputs.z_loss
-        raw_aux_loss = outputs.aux_loss
 
-        # LM head
+        # lm head
         lm_logits = self.lm_head(x)
 
         # loss
         lm_loss = None
         if labels is not None:
-            # LM loss
+            # lm loss
             labels = labels.to(lm_logits.device)
-            loss = self.criterion(
+            lm_loss = self.criterion(
                 lm_logits.view(-1, self.config.vocab_size), labels.view(-1)
             )
-            lm_loss = loss
 
             # router loss(es)
-            z_loss = self.z_loss_coef * (raw_z_loss)
+            z_loss = self.z_loss_coef * (outputs.z_loss)
             if self.config.expert_choice_router:
-                loss = loss + z_loss
+                loss = lm_loss + z_loss
+                aux_loss = None
             else:
-                aux_loss = self.aux_loss_coef * (raw_aux_loss)
-                loss = loss + z_loss + aux_loss
+                aux_loss = self.aux_loss_coef * (outputs.aux_loss)
+                loss = lm_loss + z_loss + aux_loss
 
         # outputs
         if not return_dict:
@@ -477,13 +482,14 @@ class BalmMoEForMaskedLM(BalmBase):
 
 class BalmMoEForSequenceClassification(BalmBase):
     """
-    BALM model for sequence classification. Uses the dense BALM transformer model and adds
-    a sequence-level classification head.
+    BALM Mixture-of-Experts (MoE) model for sequence classification.
+    Uses the BALM-MoE encoder and adds a sequence-level classification head.
 
     Parameters
     ----------
-    config : BalmConfig
-        The configuration object defining model architecture and hyperparameters.
+    config : BalmMoEConfig
+        Configuration object defining model architecture and hyperparameters.
+
     """
 
     config_class = BalmMoEConfig
@@ -579,12 +585,9 @@ class BalmMoEForSequenceClassification(BalmBase):
             return_dict=True,
         )
         x = outputs.last_hidden_state
-        raw_z_loss = outputs.z_loss
-        raw_aux_loss = outputs.aux_loss
 
         # classifier
         classifier_logits = self.classifier(x)
-        outputs["logits"] = classifier_logits
 
         # classification loss
         classifier_loss = None
@@ -596,11 +599,12 @@ class BalmMoEForSequenceClassification(BalmBase):
             )
 
             # router loss(es)
-            z_loss = self.z_loss_coef * (raw_z_loss)
+            z_loss = self.z_loss_coef * (outputs.z_loss)
             if self.config.expert_choice_router:
                 loss = classifier_loss + z_loss
+                aux_loss = None
             else:
-                aux_loss = self.aux_loss_coef * (raw_aux_loss)
+                aux_loss = self.aux_loss_coef * (outputs.aux_loss)
                 loss = classifier_loss + z_loss + aux_loss
 
         # outputs
