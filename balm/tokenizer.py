@@ -33,6 +33,8 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 
+# mp.set_start_method("spawn")
+
 __all__ = [
     # "TokenizerBase",
     "Tokenizer",
@@ -160,6 +162,7 @@ class Tokenizer(TokenizerBase):
         return_attention_mask: bool = False,
         return_special_tokens_mask: bool = False,
         as_dict: bool = False,
+        name: Optional[str] = None,
         verbose: bool = False,
         **kwargs,
     ) -> "BatchEncoding":
@@ -197,6 +200,12 @@ class Tokenizer(TokenizerBase):
         return_special_tokens_mask : bool, optional
             Whether to return the special tokens mask. Default is False.
 
+        as_dict : bool, optional
+            Whether to return the encoded tokens as a dictionary. Default is False.
+
+        name : str, optional
+            The name of the dataset to be tokenized. Default is None.
+
         verbose : bool, optional
             Whether to print the number of special tokens added. Default is False.
 
@@ -221,6 +230,7 @@ class Tokenizer(TokenizerBase):
             "return_attention_mask": return_attention_mask,
             "return_special_tokens_mask": return_special_tokens_mask,
             "as_dict": as_dict,
+            "name": name,
             "verbose": verbose,
         }
         all_kwargs.update(kwargs)
@@ -344,6 +354,7 @@ class Tokenizer(TokenizerBase):
         return_attention_mask: bool = False,
         return_special_tokens_mask: bool = False,
         as_dict: bool = False,
+        name: Optional[str] = None,
         verbose: bool = False,
         **kwargs,
     ) -> Dict[str, torch.Tensor]:
@@ -366,8 +377,21 @@ class Tokenizer(TokenizerBase):
             # init progress bar before launching ProcessPoolExecutor
             progress_bar = tqdm(
                 total=len(text),
-                desc="Encoding",
+                desc="Encoding" if name is None else f"Encoding ({name})",
             )
+            # async_results = []
+            # p = mp.Pool(processes=n_procs)
+            # for txt in text:
+            #     ar = p.apply_async(
+            #         self._encode,
+            #         args=(txt,),
+            #         kwds=all_kwargs,
+            #         callback=lambda x: progress_bar.update(1),
+            #     )
+            #     async_results.append(ar)
+            # p.close()
+            # p.join()
+            # encoded = [ar.get() for ar in async_results]
             with ProcessPoolExecutor(max_workers=n_procs) as executor:
                 futures = {
                     executor.submit(self._encode, txt, **all_kwargs): txt
@@ -379,6 +403,7 @@ class Tokenizer(TokenizerBase):
                     encoded.append(result)
                     progress_bar.update(1)
             progress_bar.close()
+
         encoded = [torch.tensor(e) for e in encoded]
         results_dict = {
             "input_ids": encoded,
