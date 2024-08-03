@@ -50,7 +50,7 @@ class RelativePositionalEmbedding(nn.Module):
     """
 
     def __init__(self, embed_dim: int, max_length: int):
-        super(RelativePositionalEmbedding, self).__init__()
+        super().__init__()
 
         # Compute the positional encodings once in log space.
         pe = torch.zeros(max_length, embed_dim)
@@ -100,7 +100,7 @@ class RotaryPositionalEmbedding(nn.Module):
     """
 
     def __init__(self, embed_dim: int, max_length: int):
-        super(RotaryPositionalEmbedding, self).__init__()
+        super().__init__()
         self.embed_dim = embed_dim
         self.max_length = max_length
         self.inv_freq = 1.0 / (
