@@ -8,6 +8,7 @@ import numpy as np
 
 # import sklearn as skl
 import torch
+import torch.nn.functional as F
 from sklearn.metrics import (
     # accuracy_score,
     average_precision_score,
@@ -19,16 +20,16 @@ from sklearn.metrics import (
 )
 
 __all__ = [
-    "ComputeMetrics",
-    # "ComputeMetricsForMaskedLM",
-    # "ComputeMetricsForSequenceClassification",
+    # "ComputeMetricsBase",
+    "ComputeMetricsForMaskedLM",
+    "ComputeMetricsForSequenceClassification",
 ]
 
 
 accuracy_score = evaluate.load("accuracy")
 
 
-class ComputeMetrics:
+class ComputeMetricsBase:
     def __init__(self, positive_label: int = 1):
         self.positive_label = positive_label
         self.head_loss = None
@@ -36,27 +37,7 @@ class ComputeMetrics:
         self.aux_loss = None
 
     def __call__(self, eval_preds):
-        # process eval_preds
-        self.logits, self.labels = eval_preds
-        if isinstance(self.logits, tuple):
-            self.logits = self.logits[0]
-
-        # compute probabilities and predictions
-        self.probabilities = (
-            torch.softmax(torch.from_numpy(self.logits), dim=1).detach().numpy()[:, -1]
-        )
-        self.predictions = np.argmax(self.logits, axis=1)
-
-        # build outputs
-        return {
-            "accuracy": self.accuracy(),
-            "precision": self.precision(),
-            "recall": self.recall(),
-            "auroc": self.auroc(),
-            "aupr": self.aupr(),
-            "f1": self.f1(),
-            "mcc": self.mcc(),
-        }
+        raise NotImplementedError
 
     def accuracy(self):
         accuracy = accuracy_score.compute(
@@ -99,15 +80,63 @@ class ComputeMetrics:
         return mcc
 
 
-# class ComputeMetricsForMaskedLM(ComputeMetricsBase):
-#     head_loss_name: str = "lm_loss"
+class ComputeMetricsForMaskedLM(ComputeMetricsBase):
+    def __init__(self, positive_label: int = 1):
+        super().__init__(positive_label=positive_label)
 
-#     def __init__(self, positive_label: int = 1):
-#         super().__init__(positive_label=positive_label)
+    def __call__(self, eval_preds):
+        # process eval_preds
+        self.logits, self.labels = eval_preds
+        if isinstance(self.logits, tuple):
+            self.logits = self.logits[0]
+        self.logits = torch.from_numpy(self.logits).detach().cpu()
+        self.labels = torch.from_numpy(self.labels).detach().cpu()
+
+        # build outputs
+        return {
+            "accuracy": self.accuracy(),
+            "perplexity": self.perplexity(),
+        }
+
+    def accuracy(self):
+        predictions = F.softmax(self.logits, dim=-1).argmax(dim=-1)
+        label_mask = self.labels != -100
+        correct_predictions = torch.sum((predictions == self.labels) * label_mask)
+        return correct_predictions.float() / torch.sum(label_mask)
+
+    def perplexity(self):
+        logits_flat = self.logits.view(-1, self.logits.size(-1))
+        labels_flat = self.labels.view(-1)
+        ce_loss = F.cross_entropy(
+            logits_flat, labels_flat, ignore_index=-100, reduction="mean"
+        )
+        perplexity = torch.exp(ce_loss)
+        return perplexity.item()
 
 
-# class ComputeMetricsForSequenceClassification(ComputeMetricsBase):
-#     head_loss_name: str = "classifier_loss"
+class ComputeMetricsForSequenceClassification(ComputeMetricsBase):
+    def __init__(self, positive_label: int = 1):
+        super().__init__(positive_label=positive_label)
 
-#     def __init__(self, positive_label: int = 1):
-#         super().__init__(positive_label=positive_label)
+    def __call__(self, eval_preds):
+        # process eval_preds
+        self.logits, self.labels = eval_preds
+        if isinstance(self.logits, tuple):
+            self.logits = self.logits[0]
+
+        # compute probabilities and predictions
+        self.probabilities = (
+            torch.softmax(torch.from_numpy(self.logits), dim=1).detach().numpy()[:, -1]
+        )
+        self.predictions = np.argmax(self.logits, axis=1)
+
+        # build outputs
+        return {
+            "accuracy": self.accuracy(),
+            "precision": self.precision(),
+            "recall": self.recall(),
+            "auroc": self.auroc(),
+            "aupr": self.aupr(),
+            "f1": self.f1(),
+            "mcc": self.mcc(),
+        }
