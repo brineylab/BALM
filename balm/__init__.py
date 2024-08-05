@@ -25,6 +25,7 @@
 from .config import *
 from .data import *
 from .embedding import *
+from .eval import *
 from .loss import *
 from .models import *
 from .modules import *
