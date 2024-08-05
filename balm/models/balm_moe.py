@@ -433,12 +433,13 @@ class BalmMoEForMaskedLM(BalmBase):
                 v
                 for v in [
                     loss,
+                    lm_logits,
                     outputs.hidden_states,
                     outputs.attentions,
                     outputs.router_logits,
                     outputs.expert_indexes,
-                    z_loss,
                     aux_loss,
+                    z_loss,
                     lm_loss,
                 ]
                 if v is not None
@@ -446,6 +447,7 @@ class BalmMoEForMaskedLM(BalmBase):
 
         return MoEMaskedLMOutput(
             loss=loss,
+            logits=lm_logits,
             z_loss=z_loss,
             aux_loss=aux_loss,
             lm_loss=lm_loss,
@@ -594,12 +596,13 @@ class BalmMoEForSequenceClassification(BalmBase):
                 v
                 for v in [
                     loss,
+                    classifier_logits,
                     outputs.hidden_states,
                     outputs.attentions,
                     outputs.router_logits,
                     outputs.expert_indexes,
-                    z_loss,
                     aux_loss,
+                    z_loss,
                     classifier_loss,
                 ]
                 if v is not None
@@ -607,6 +610,7 @@ class BalmMoEForSequenceClassification(BalmBase):
 
         return MoESequenceClassifierOutput(
             loss=loss,
+            logits=classifier_logits,
             z_loss=z_loss,
             aux_loss=aux_loss,
             classifier_loss=classifier_loss,
