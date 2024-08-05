@@ -22,6 +22,8 @@
 #
 
 
+from transformers import TrainingArguments
+
 from .config import *
 from .data import *
 from .embedding import *
