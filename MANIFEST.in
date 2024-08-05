@@ -1,6 +1,10 @@
 include README.md
+include LICENSE
 include requirements*
-include data_processing/*
+include docs/*.txt
+
+include config/*
+include eval/*
 include model/*
-include training/*
+include train/*
 
