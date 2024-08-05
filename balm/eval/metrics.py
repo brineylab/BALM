@@ -88,15 +88,45 @@ class ComputeMetricsForMaskedLM(ComputeMetricsBase):
         # process eval_preds
         self.logits, self.labels = eval_preds
         if isinstance(self.logits, tuple):
+            # logits is the first element of the tuple
             self.logits = self.logits[0]
+
+            # the remaining elements may be extra losses (from MoE routers)
+            if len(eval_preds[0]) >= 2:
+                other_data = eval_preds[0][1:]
+                batch_size = self.logits.shape[-1]  # self.logits is a numpy array
+                # final element might the MaskedLM head loss
+                if other_data[-1].shape == torch.Size(
+                    [
+                        batch_size,
+                    ]
+                ):
+                    self.lm_loss = np.mean(other_data[-1])
+                # next to last element might be z-loss
+                if len(other_data) >= 2:
+                    if other_data[-2].shape == (batch_size,):
+                        self.z_loss = np.mean(other_data[-2])
+                # third to last might be aux loss
+                if len(other_data) >= 3:
+                    if other_data[-3].shape == (batch_size,):
+                        self.aux_loss = np.mean(other_data[-3])
+
         self.logits = torch.from_numpy(self.logits).detach().cpu()
         self.labels = torch.from_numpy(self.labels).detach().cpu()
 
-        # build outputs
-        return {
+        # build output
+        return_dict = {
             "accuracy": self.accuracy(),
             "perplexity": self.perplexity(),
         }
+        if self.lm_loss is not None:
+            return_dict["mlm loss"] = self.lm_loss
+        if self.z_loss is not None:
+            return_dict["z loss"] = self.z_loss
+        if self.aux_loss is not None:
+            return_dict["aux loss"] = self.aux_loss
+
+        return return_dict
 
     def accuracy(self):
         predictions = F.softmax(self.logits, dim=-1).argmax(dim=-1)
