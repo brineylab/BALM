@@ -164,14 +164,14 @@ class MoEMaskedLMOutput(ModelOutput):
     """
 
     loss: Optional[torch.FloatTensor] = None
-    z_loss: torch.FloatTensor = None
-    aux_loss: torch.FloatTensor = None
-    lm_loss: torch.FloatTensor = None
     logits: torch.FloatTensor = None
     hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
     attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
     router_logits: Optional[Tuple[torch.FloatTensor]] = None
     expert_indexes: Optional[Tuple[torch.LongTensor]] = None
+    z_loss: torch.FloatTensor = None
+    aux_loss: torch.FloatTensor = None
+    lm_loss: torch.FloatTensor = None
 
 
 @dataclass
@@ -211,11 +211,11 @@ class MoESequenceClassifierOutput(ModelOutput):
     """
 
     loss: Optional[torch.FloatTensor] = None
-    z_loss: torch.FloatTensor = None
-    aux_loss: torch.FloatTensor = None
-    classifier_loss: torch.FloatTensor = None
     logits: torch.FloatTensor = None
     hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
     attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
     router_logits: Optional[Tuple[torch.FloatTensor]] = None
     expert_indexes: Optional[Tuple[torch.LongTensor]] = None
+    z_loss: torch.FloatTensor = None
+    aux_loss: torch.FloatTensor = None
+    classifier_loss: torch.FloatTensor = None
