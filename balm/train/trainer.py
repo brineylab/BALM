@@ -77,6 +77,18 @@ class Trainer(HuggingFaceTrainer):
         # Good practice: save your training arguments together with the trained model
         torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
 
+    def terminate(self):
+        """
+        Clean up resources. This should free up GPU memory by deleting the
+        model, optimizer, and learning rate scheduler.
+        """
+        del self.model
+        if hasattr(self, "optimizer"):
+            del self.optimizer
+        if hasattr(self, "lr_scheduler"):
+            del self.lr_scheduler
+        torch.cuda.empty_cache()
+
 
 # import inspect
 # import json
