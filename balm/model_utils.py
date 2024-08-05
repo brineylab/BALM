@@ -1,4 +1,4 @@
-# Copyright (c) 2024 Bryan Briney
+# Copyright (c) 2024 brineylab @ scripps
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
@@ -6,6 +6,8 @@
 from typing import Union
 
 import torch
+
+__all__ = ["wrap_model", "DTYPES"]
 
 
 def wrap_model(

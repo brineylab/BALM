@@ -1,4 +1,4 @@
-# Copyright (c) 2024 Bryan Briney
+# Copyright (c) brineylab @ scripps
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
