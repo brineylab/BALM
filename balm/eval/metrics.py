@@ -18,13 +18,17 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-__all__ = ["ComputeMetricsForMaskedLM", "ComputeMetricsForSequenceClassification"]
+__all__ = [
+    "ComputeMetrics",
+    # "ComputeMetricsForMaskedLM",
+    # "ComputeMetricsForSequenceClassification",
+]
 
 
 accuracy_score = evaluate.load("accuracy")
 
 
-class ComputeMetricsBase:
+class ComputeMetrics:
     def __init__(self, positive_label: int = 1):
         self.positive_label = positive_label
         self.head_loss = None
@@ -35,23 +39,16 @@ class ComputeMetricsBase:
         # process eval_preds
         self.logits, self.labels = eval_preds
         if isinstance(self.logits, tuple):
-            logits = self.logits[0]
-            if len(self.logits) >= 3:
-                self.head_loss = self.logits[-1]
-                self.z_loss = self.logits[-2]
-                if len(self.logits) >= 4:
-                    self.aux_loss = self.logits[-3]
-        else:
-            logits = self.logits
+            self.logits = self.logits[0]
 
         # compute probabilities and predictions
         self.probabilities = (
-            torch.softmax(torch.from_numpy(logits), dim=1).detach().numpy()[:, -1]
+            torch.softmax(torch.from_numpy(self.logits), dim=1).detach().numpy()[:, -1]
         )
-        self.predictions = np.argmax(self.probabilities, axis=1)
+        self.predictions = np.argmax(self.logits, axis=1)
 
         # build outputs
-        return_vals = {
+        return {
             "accuracy": self.accuracy(),
             "precision": self.precision(),
             "recall": self.recall(),
@@ -60,14 +57,6 @@ class ComputeMetricsBase:
             "f1": self.f1(),
             "mcc": self.mcc(),
         }
-        if self.head_loss is not None:
-            return_vals[self.head_loss_name] = self.head_loss
-        if self.z_loss is not None:
-            return_vals["z_loss"] = self.z_loss
-        if self.aux_loss is not None:
-            return_vals["aux_loss"] = self.aux_loss
-
-        return return_vals
 
     def accuracy(self):
         accuracy = accuracy_score.compute(
@@ -110,15 +99,15 @@ class ComputeMetricsBase:
         return mcc
 
 
-class ComputeMetricsForMaskedLM(ComputeMetricsBase):
-    head_loss_name: str = "lm_loss"
+# class ComputeMetricsForMaskedLM(ComputeMetricsBase):
+#     head_loss_name: str = "lm_loss"
 
-    def __init__(self, positive_label: int = 1):
-        super().__init__(positive_label=positive_label)
+#     def __init__(self, positive_label: int = 1):
+#         super().__init__(positive_label=positive_label)
 
 
-class ComputeMetricsForSequenceClassification(ComputeMetricsBase):
-    head_loss_name: str = "classifier_loss"
+# class ComputeMetricsForSequenceClassification(ComputeMetricsBase):
+#     head_loss_name: str = "classifier_loss"
 
-    def __init__(self, positive_label: int = 1):
-        super().__init__(positive_label=positive_label)
+#     def __init__(self, positive_label: int = 1):
+#         super().__init__(positive_label=positive_label)
