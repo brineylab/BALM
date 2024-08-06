@@ -18,6 +18,9 @@ __all__ = [
 ]
 
 
+DEFAULT_VOCAB_PATH = os.path.join(os.path.dirname(__file__), "vocab.json")
+
+
 class TokenizerBase:
     """
     Base class for tokenizers.
@@ -49,7 +52,7 @@ class Tokenizer(TokenizerBase):
 
     def __init__(
         self,
-        vocab: Union[str, Dict[str, int]],
+        vocab: Union[str, Dict[str, int]] = DEFAULT_VOCAB_PATH,
         model_max_length: int = 320,
         cls_token: str = "<cls>",
         pad_token: str = "<pad>",
