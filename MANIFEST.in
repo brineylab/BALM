@@ -3,8 +3,10 @@ include LICENSE
 include requirements*
 include docs/*.txt
 
-include config/*
-include eval/*
-include model/*
-include train/*
+include balm/vocab.json
+
+include balm/config/*
+include balm/eval/*
+include balm/model/*
+include balm/train/*
 
