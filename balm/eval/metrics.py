@@ -32,7 +32,7 @@ accuracy_score = evaluate.load("accuracy")
 class ComputeMetricsBase:
     def __init__(self, positive_label: int = 1):
         self.positive_label = positive_label
-        self.head_loss = None
+        self.lm_loss = None
         self.z_loss = None
         self.aux_loss = None
 
