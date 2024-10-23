@@ -410,7 +410,6 @@ class BalmMoEForMaskedLM(BalmBase):
         lm_logits = self.lm_head(x)
 
         # loss
-        lm_loss = None
         if labels is not None:
             # lm loss
             labels = labels.to(lm_logits.device)
@@ -426,6 +425,11 @@ class BalmMoEForMaskedLM(BalmBase):
             else:
                 aux_loss = self.aux_loss_coef * (outputs.aux_loss)
                 loss = lm_loss + z_loss + aux_loss
+        else:
+            loss = None
+            lm_loss = None
+            z_loss = None
+            aux_loss = None
 
         # outputs
         if not return_dict:
