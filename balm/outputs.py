@@ -4,7 +4,7 @@
 
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import torch
 from transformers.utils.generic import ModelOutput
@@ -13,7 +13,26 @@ __all__ = ["BaseModelOutput", "MaskedLMOutput", "SequenceClassifierOutput"]
 
 
 @dataclass
-class BaseModelOutput(ModelOutput):
+class BalmModelOutput(ModelOutput):
+    """
+    Base class for Balm model outputs, with potential hidden states and attentions.
+    """
+
+    def to(self, device: Union[torch.device, str]):
+        for key, value in self.__dict__.items():
+            # move tensors to device
+            if isinstance(value, torch.Tensor):
+                self.__dict__[key] = value.to(device)
+            # move tuples of tensors to device
+            elif isinstance(value, tuple) and all(
+                isinstance(v, torch.Tensor) for v in value
+            ):
+                self.__dict__[key] = tuple(v.to(device) for v in value)
+        return self
+
+
+@dataclass
+class BaseModelOutput(BalmModelOutput):
     """
     Base class for model's outputs, with potential hidden states and attentions.
 
@@ -36,7 +55,7 @@ class BaseModelOutput(ModelOutput):
 
 
 @dataclass
-class MaskedLMOutput(ModelOutput):
+class MaskedLMOutput(BalmModelOutput):
     """
     Base class for outputs of masked language models.
 
@@ -63,7 +82,7 @@ class MaskedLMOutput(ModelOutput):
 
 
 @dataclass
-class SequenceClassifierOutput(ModelOutput):
+class SequenceClassifierOutput(BalmModelOutput):
     """
     Base class for outputs of sequence classification models.
 
@@ -89,7 +108,7 @@ class SequenceClassifierOutput(ModelOutput):
 
 
 @dataclass
-class MoEModelOutput(ModelOutput):
+class MoEModelOutput(BalmModelOutput):
     """
     Base class for MoE model outputs, with potential hidden states and attentions.
 
@@ -128,7 +147,7 @@ class MoEModelOutput(ModelOutput):
 
 
 @dataclass
-class MoEMaskedLMOutput(ModelOutput):
+class MoEMaskedLMOutput(BalmModelOutput):
     """
     Base class for MoE model outputs, with potential hidden states and attentions.
 
@@ -175,7 +194,7 @@ class MoEMaskedLMOutput(ModelOutput):
 
 
 @dataclass
-class MoESequenceClassifierOutput(ModelOutput):
+class MoESequenceClassifierOutput(BalmModelOutput):
     """
     Base class for MoE model outputs, with potential hidden states and attentions.
 
