@@ -328,6 +328,10 @@ class BalmHybridMoEForMaskedLM(BalmBase):
             else:
                 aux_loss = self.aux_loss_coef * (outputs.aux_loss)
                 loss = lm_loss + z_loss + aux_loss
+        else:
+            loss = None
+            z_loss = None
+            aux_loss = None
 
         # outputs
         if not return_dict:
@@ -484,6 +488,10 @@ class BalmHybridMoEForSequenceClassification(BalmBase):
             else:
                 aux_loss = self.aux_loss_coef * (outputs.aux_loss)
                 loss = classifier_loss + z_loss + aux_loss
+        else:
+            loss = None
+            z_loss = None
+            aux_loss = None
 
         # outputs
         if not return_dict:
