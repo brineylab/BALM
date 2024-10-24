@@ -282,6 +282,7 @@ class ExpertChoiceRouter(RouterBase):
         num_experts: int,
         expert_capacity: int,
         num_shared_experts: int = 0,
+        send_bos_to_all_experts: bool = True,
         dtype: str = "float32",
         bias: bool = False,
         jitter: float = 0.0,
@@ -298,6 +299,7 @@ class ExpertChoiceRouter(RouterBase):
             num_routable_experts=num_experts - num_shared_experts,
         )
         self.num_shared_experts = num_shared_experts
+        self.send_bos_to_all_experts = send_bos_to_all_experts
         self.ignore_padding_tokens = ignore_padding_tokens
 
     def forward(
@@ -328,10 +330,15 @@ class ExpertChoiceRouter(RouterBase):
         router_probs, router_logits = self._compute_router_probabilities(x, dim=-2)
         expert_mask = torch.zeros_like(router_probs)
 
+        # adjust expert capacity if BOS is sent to all experts
+        expert_capacity = self.expert_capacity
+        if self.send_bos_to_all_experts:
+            expert_capacity -= 1
+
         # Select top-k tokens for each expert
         for i in range(self.num_experts - self.num_shared_experts):
             _, top_k_indices = torch.topk(
-                router_probs[..., i], k=self.expert_capacity, dim=1
+                router_probs[..., i], k=expert_capacity, dim=1
             )
             expert_mask[:, :, i].scatter_(1, top_k_indices, 1)
 
@@ -347,5 +354,10 @@ class ExpertChoiceRouter(RouterBase):
                 router_probs[..., : self.num_shared_experts]
             )
             router_probs = torch.cat((shared_expert_probs, router_probs), dim=-1)
+
+        # send BOS token to all experts, if specified
+        if self.send_bos_to_all_experts:
+            expert_mask[:, 0, :] = 1  # first token of sequence length dim
+            router_probs[:, 0, :] = 1  # TODO: could remove so router probs propagate
 
         return expert_mask, router_probs, router_logits

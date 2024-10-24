@@ -21,6 +21,7 @@ class BalmMoEConfig(BaseConfig):
         expert_capacity: Optional[int] = None,
         expert_capacity_multiplier: float = 1.5,
         num_shared_experts: int = 0,
+        send_bos_to_all_experts: bool = True,
         activation: str = "swiglu",
         positional_embedding_type: str = "rotary",
         pre_norm: bool = True,
@@ -148,6 +149,7 @@ class BalmMoEConfig(BaseConfig):
             else int(max_length / num_experts * self.expert_capacity_multiplier)
         )
         self.num_shared_experts = int(num_shared_experts)
+        self.send_bos_to_all_experts = bool(send_bos_to_all_experts)
         if positional_embedding_type.lower() not in ["rotary", "relative"]:
             raise ValueError(
                 f"Invalid positional embedding type: {positional_embedding_type}. Options are 'rotary' or 'relative'."

@@ -222,6 +222,7 @@ class SparseMLP(nn.Module):
         num_experts: int,
         expert_capacity: int,
         num_shared_experts: int = 0,
+        send_bos_to_all_experts: bool = True,
         top_k: int = 1,
         activation: str = "swiglu",
         expert_ffn_dropout: float = 0.0,
@@ -239,6 +240,7 @@ class SparseMLP(nn.Module):
             expert_capacity=expert_capacity,
             top_k=top_k,
             num_shared_experts=num_shared_experts,
+            send_bos_to_all_experts=send_bos_to_all_experts,
             dtype=router_dtype,
             bias=router_bias,
             jitter=router_jitter,
@@ -292,7 +294,6 @@ class SparseMLP(nn.Module):
         x = torch.stack(expert_outputs, dim=-1) * expert_mask.unsqueeze(-2)
         # multiply by router probs before summing
         x = torch.sum(x * router_probs.unsqueeze(-2), dim=-1)
-        # x = x.sum(dim=-1)
 
         return x, (router_logits, expert_mask)
 
