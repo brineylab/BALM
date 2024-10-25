@@ -28,6 +28,9 @@ class BalmModelOutput(ModelOutput):
                 isinstance(v, torch.Tensor) for v in value
             ):
                 self.__dict__[key] = tuple(v.to(device) for v in value)
+        # clear GPU cache if moving to CPU
+        if torch.cuda.is_available() and torch.device(device).type == "cpu":
+            torch.cuda.empty_cache()
         return self
 
 
