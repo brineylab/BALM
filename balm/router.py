@@ -82,7 +82,7 @@ class RouterBase(nn.Module):
         self.input_dtype = x.dtype
         x = x.to(self.dtype)
         if self.jitter > 0:
-            jitter = torch.empty_like(x).uniform_(1.0 - self.jitter, 1.0 + self.jitter)
+            jitter = torch.empty_like(x).uniform(1.0 - self.jitter, 1.0 + self.jitter)
             x = x * jitter
             # x *= torch.empty_like(x).uniform_(1.0 - self.jitter, 1.0 + self.jitter)
         logits = self.classifier(x)  # (batch, seq_len, num_experts)
@@ -336,6 +336,8 @@ class ExpertChoiceRouter(RouterBase):
         expert_capacity = self.expert_capacity
         if self.send_bos_to_all_experts:
             expert_capacity -= 1
+            router_probs = router_probs[:, 1:, :]
+            expert_mask = expert_mask[:, 1:, :]
 
         # Select top-k tokens for each expert
         for i in range(self.num_experts - self.num_shared_experts):
@@ -360,7 +362,11 @@ class ExpertChoiceRouter(RouterBase):
 
         # send BOS token to all experts, if specified
         if self.send_bos_to_all_experts:
-            expert_mask[:, 0, :] = 1  # first token of sequence length dim
-            router_probs[:, 0, :] = 1  # TODO: could remove so router probs propagate
+            # expert_mask[:, 0, :] = 1  # first token of sequence length dim
+            # router_probs[:, 0, :] = 1  # TODO: could remove so router probs propagate
+            bos_mask = torch.ones_like(expert_mask[:, 0, :])
+            expert_mask = torch.cat((bos_mask, expert_mask), dim=1)
+            bos_probs = torch.ones_like(router_probs[:, 0, :])
+            router_probs = torch.cat((bos_probs, router_probs), dim=1)
 
         return expert_mask, router_probs, router_logits
