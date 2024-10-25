@@ -364,9 +364,14 @@ class ExpertChoiceRouter(RouterBase):
         if self.send_bos_to_all_experts:
             # expert_mask[:, 0, :] = 1  # first token of sequence length dim
             # router_probs[:, 0, :] = 1  # TODO: could remove so router probs propagate
-            bos_mask = torch.ones_like(expert_mask[:, 0, :])
+
+            # add BOS token to expert mask
+            bos_mask = torch.ones_like(expert_mask[:, 0, :]).unsqueeze(1)
             expert_mask = torch.cat((bos_mask, expert_mask), dim=1)
-            bos_probs = torch.ones_like(router_probs[:, 0, :])
+
+            # add BOS token to router probs
+            # TODO: could try removing this so learned router probs propagate
+            bos_probs = torch.ones_like(router_probs[:, 0, :]).unsqueeze(1)
             router_probs = torch.cat((bos_probs, router_probs), dim=1)
 
         return expert_mask, router_probs, router_logits
