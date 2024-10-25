@@ -1,9 +1,12 @@
 abstar
 abutils
 datasets
+evaluate
 numpy
 pandas 
 peft
 polars
 safetensors
 transformers
+torch
+tqdm
