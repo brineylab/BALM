@@ -82,7 +82,9 @@ class RouterBase(nn.Module):
         self.input_dtype = x.dtype
         x = x.to(self.dtype)
         if self.jitter > 0:
-            x *= torch.empty_like(x).uniform_(1.0 - self.jitter, 1.0 + self.jitter)
+            jitter = torch.empty_like(x).uniform_(1.0 - self.jitter, 1.0 + self.jitter)
+            x = x * jitter
+            # x *= torch.empty_like(x).uniform_(1.0 - self.jitter, 1.0 + self.jitter)
         logits = self.classifier(x)  # (batch, seq_len, num_experts)
         probabilities = F.softmax(logits, dim=dim, dtype=self.dtype).to(
             self.input_dtype
@@ -340,7 +342,8 @@ class ExpertChoiceRouter(RouterBase):
             _, top_k_indices = torch.topk(
                 router_probs[..., i], k=expert_capacity, dim=1
             )
-            expert_mask[:, :, i].scatter_(1, top_k_indices, 1)
+            expert_mask[:, :, i] = expert_mask[:, :, i].scatter(1, top_k_indices, 1)
+            # expert_mask[:, :, i].scatter_(1, top_k_indices, 1)
 
         # shared experts
         if self.num_shared_experts > 0:
