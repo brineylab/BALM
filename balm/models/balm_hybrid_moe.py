@@ -56,6 +56,7 @@ class BalmHybridMoEModel(BalmBase):
                     max_length=self.config.max_length,
                     top_k=self.config.router_top_k,
                     expert_capacity=self.config.expert_capacity,
+                    send_bos_to_all_experts=self.config.send_bos_to_all_experts,
                     activation=self.config.activation,
                     expert_activation=self.config.expert_activation,
                     dropout=self.config.dropout,

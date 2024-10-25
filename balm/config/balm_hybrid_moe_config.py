@@ -22,6 +22,7 @@ class BalmHybridMoEConfig(BaseConfig):
         expert_capacity: Optional[int] = None,
         expert_capacity_multiplier: float = 1.5,
         num_shared_experts: int = 0,
+        send_bos_to_all_experts: bool = True,
         activation: str = "swiglu",
         expert_activation: str = "gelu",
         positional_embedding_type: str = "rotary",
@@ -80,6 +81,9 @@ class BalmHybridMoEConfig(BaseConfig):
 
         num_shared_experts : int, default=0
             The number of shared experts in the transformer.
+
+        send_bos_to_all_experts : bool, default=True
+            Whether to send the BOS token to all experts. The effective expert capacity will be reduced by one if `send_bos_to_all_experts` is True.
 
         activation : str, default="gelu"
             The activation function to use for the experts. Options are "relu" and "gelu".
@@ -151,6 +155,7 @@ class BalmHybridMoEConfig(BaseConfig):
             else int(max_length / num_experts * self.expert_capacity_multiplier)
         )
         self.num_shared_experts = int(num_shared_experts)
+        self.send_bos_to_all_experts = bool(send_bos_to_all_experts)
         if positional_embedding_type.lower() not in ["rotary", "relative"]:
             raise ValueError(
                 f"Invalid positional embedding type: {positional_embedding_type}. Options are 'rotary' or 'relative'."

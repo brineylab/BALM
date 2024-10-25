@@ -34,7 +34,7 @@ class BalmMoEConfig(BaseConfig):
         router_dtype: str = "float32",
         router_ignore_padding_tokens: bool = True,
         expert_choice_router: bool = False,
-        dropout: float = 0.1,
+        dropout: float = 0.0,
         attention_dropout: float = 0.0,
         expert_ffn_dropout: float = 0.0,
         token_embedding_dropout: float = 0.0,
@@ -79,6 +79,9 @@ class BalmMoEConfig(BaseConfig):
 
         num_shared_experts : int, default=0
             The number of shared experts in the transformer.
+
+        send_bos_to_all_experts : bool, default=True
+            Whether to send the BOS token to all experts. The effective expert capacity will be reduced by one if `send_bos_to_all_experts` is True.
 
         activation : str, default="gelu"
             The activation function to use for the experts. Options are "relu" and "gelu".
