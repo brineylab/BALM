@@ -126,6 +126,9 @@ class TopKRouter(RouterBase):
     num_shared_experts : int, optional
         Number of shared experts that process all tokens. The default is 0.
 
+    send_bos_to_all_experts : bool, optional
+        Whether to send the BOS token to all experts. The default is ``False``.
+
     dtype : str, optional
         Data type to use for router probabilities. The default is "float32".
 
@@ -157,6 +160,7 @@ class TopKRouter(RouterBase):
         expert_capacity: int,
         top_k: int = 1,
         num_shared_experts: int = 0,
+        send_bos_to_all_experts: bool = False,
         dtype: str = "float32",
         bias: bool = False,
         jitter: float = 0.0,
@@ -174,6 +178,7 @@ class TopKRouter(RouterBase):
         )
         self.top_k = top_k
         self.num_shared_experts = num_shared_experts
+        self.send_bos_to_all_experts = send_bos_to_all_experts
         self.ignore_padding_tokens = ignore_padding_tokens
 
     def forward(
@@ -210,9 +215,16 @@ class TopKRouter(RouterBase):
             dim=-2
         )
 
+        # adjust expert capacity if BOS is sent to all experts
+        expert_capacity = self.expert_capacity
+        if self.send_bos_to_all_experts:
+            expert_capacity -= 1
+            router_probs = router_probs[:, 1:, :]
+            expert_mask = expert_mask[:, 1:, :]
+
         # mask tokens if their desired experts are above capacity
         token_priority = torch.cumsum(expert_mask, dim=-2)
-        expert_capacity_mask = token_priority <= self.expert_capacity
+        expert_capacity_mask = token_priority <= expert_capacity
         expert_mask = expert_mask * expert_capacity_mask
 
         # shared experts
@@ -227,6 +239,16 @@ class TopKRouter(RouterBase):
                 router_probs[..., : self.num_shared_experts]
             )
             router_probs = torch.cat((shared_expert_probs, router_probs), dim=-1)
+
+        # send BOS token to all experts, if specified
+        if self.send_bos_to_all_experts:
+            # add BOS token to expert mask
+            bos_mask = torch.ones_like(expert_mask[:, 0, :]).unsqueeze(1)
+            expert_mask = torch.cat((bos_mask, expert_mask), dim=1)
+            # add BOS token to router probs
+            # TODO: could try removing this so learned router probs propagate
+            bos_probs = torch.ones_like(router_probs[:, 0, :]).unsqueeze(1)
+            router_probs = torch.cat((bos_probs, router_probs), dim=1)
 
         return expert_mask, router_probs, router_logits
 
@@ -261,6 +283,9 @@ class ExpertChoiceRouter(RouterBase):
     num_shared_experts : int, optional
         Number of shared experts that process all tokens. The default is 0.
 
+    send_bos_to_all_experts : bool, optional
+        Whether to send the BOS token to all experts. The default is ``False``.
+
     dtype : str, optional
         Data type to use for router probabilities. The default is "float32".
 
@@ -284,7 +309,7 @@ class ExpertChoiceRouter(RouterBase):
         num_experts: int,
         expert_capacity: int,
         num_shared_experts: int = 0,
-        send_bos_to_all_experts: bool = True,
+        send_bos_to_all_experts: bool = False,
         dtype: str = "float32",
         bias: bool = False,
         jitter: float = 0.0,
