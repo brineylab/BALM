@@ -432,6 +432,10 @@ class Tokenizer(TokenizerBase):
         if isinstance(tokens, int):
             return self.idx_to_tok[tokens]
         if isinstance(tokens, torch.Tensor):
+            # single token as a tensor
+            if not tokens.shape:
+                return self.idx_to_tok[tokens.item()]
+            # multiple tokens as a tensor
             tokens = tokens.tolist()
         return [self.idx_to_tok[tok] for tok in tokens]
 
