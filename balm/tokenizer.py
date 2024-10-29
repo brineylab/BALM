@@ -96,6 +96,7 @@ class Tokenizer(TokenizerBase):
         super().__init__(vocab)
         self.max_length = model_max_length
         self.tok_to_idx = self.vocab
+        self.idx_to_tok = {v: k for k, v in self.vocab.items()}
 
         self.unk_token = unk_token
         self.pad_token = pad_token
@@ -408,6 +409,31 @@ class Tokenizer(TokenizerBase):
             return results_dict
         else:
             return BatchEncoding(results_dict)
+
+    def decode(
+        self, tokens: Union[Iterable[int], torch.Tensor, int]
+    ) -> Union[str, List[str]]:
+        """
+        Decodes a sequence of tokens into a string.
+
+        Parameters
+        ----------
+        tokens : Union[Iterable[int], torch.Tensor, int]
+            The token(s) to decode. Can be an iterable of integers, a PyTorch tensor, or a single integer.
+
+        Returns
+        -------
+        Union[str, List[str]]
+            The decoded token(s). If a single integer is provided, a single string is returned.
+            If an iterable of integers is provided, a list of strings is returned.
+            If a PyTorch tensor is provided, a list of strings is returned.
+
+        """
+        if isinstance(tokens, int):
+            return self.idx_to_tok[tokens]
+        if isinstance(tokens, torch.Tensor):
+            tokens = tokens.tolist()
+        return [self.idx_to_tok[tok] for tok in tokens]
 
     def _encode(
         self,
