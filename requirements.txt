@@ -8,5 +8,6 @@ peft
 polars
 safetensors
 transformers
+tokenizers
 torch
 tqdm
