@@ -376,10 +376,10 @@ class BalmForSequenceClassification(BalmBase):
         logits = self.classifier(sequence_output)
 
         # classification loss
-        loss = None
+        classification_loss = None
         if labels is not None:
             labels = labels.to(logits.device)
-            loss = self.criterion(
+            classification_loss = self.criterion(
                 logits.view(-1, self.config.num_labels),
                 labels.view(-1),
             )
@@ -387,10 +387,14 @@ class BalmForSequenceClassification(BalmBase):
         # output
         if not return_dict:
             output = (logits,) + outputs[1:]
-            return ((loss,) + output) if loss is not None else output
+            return (
+                ((classification_loss,) + output)
+                if classification_loss is not None
+                else output
+            )
 
         return SequenceClassifierOutput(
-            loss=loss,
+            loss=classification_loss,
             logits=logits,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
