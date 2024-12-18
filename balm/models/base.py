@@ -18,6 +18,30 @@ WEIGHTS_NAME = "model.pt"
 SAFE_WEIGHTS_NAME = "model.safetensors"
 
 
+class FreezeBaseModelMixin:
+    def freeze_base_model(self, base_model: Optional[str] = None):
+        if base_model is None:
+            if not hasattr(self.__class__, "base_model_prefix"):
+                raise ValueError(
+                    f"{self.__class__.__name__} does not have a default base model prefix, so you need to provide `base_model`."
+                )
+            base_model = getattr(self, self.__class__.base_model_prefix)
+        else:
+            if not hasattr(self, base_model):
+                raise ValueError(
+                    f"This model instance does not have the supplied base model ({base_model})."
+                )
+            base_model = getattr(self, base_model)
+        for param in base_model.parameters():
+            param.requires_grad = False
+
+        # zero out router loss coefficients (MoE models only)
+        if hasattr(self, "router_z_loss_coef"):
+            self.router_z_loss_coef = 0.0
+        if hasattr(self, "router_aux_loss_coef"):
+            self.router_aux_loss_coef = 0.0
+
+
 class BalmBase(nn.Module):
     """
     Base class for Balm models.
@@ -155,6 +179,7 @@ class BalmBase(nn.Module):
         model_path: str,
         weights_name: str = WEIGHTS_NAME,
         config: Optional[Union[str, BaseConfig, dict]] = None,
+        quiet: bool = False,
         **config_kwargs,
     ):
         """
@@ -173,6 +198,9 @@ class BalmBase(nn.Module):
             Alternate configuration object or path to an alternate configuration file.
             If not provided, the configuration (``config.json``) will be loaded from the
             model directory.
+
+        quiet : bool, optional, defaults to `False`
+            Whether or not to suppress informational print statements.
 
         config_kwargs : dict, optional
             Additional keyword arguments that will be set in the model's config (and will
@@ -214,33 +242,37 @@ class BalmBase(nn.Module):
         # missing keys are keys in the model that are not in the saved state dict
         if len(extra_keys.unexpected_keys) > 0:
             unexpected_keys = "\n  - " + "\n  - ".join(extra_keys.unexpected_keys)
-            print(
-                f"Some weights of the model checkpoint at {model_path} were not used when"
-                f" initializing {model.__class__.__name__}: {unexpected_keys}\nThis IS expected if you are"
-                f" initializing {model.__class__.__name__} from the checkpoint of a model trained on another task or"
-                " with another architecture (e.g. initializing a BalmForSequenceClassification model from a"
-                " BalmForMaskedLM model).\nThis IS NOT expected if you are initializing"
-                f" {model.__class__.__name__} from the checkpoint of a model that you expect to be exactly identical"
-                " (e.g. initializing a BalmForSequenceClassification model from a BalmForSequenceClassification model).\n"
-            )
+            if not quiet:
+                print(
+                    f"Some weights of the model checkpoint at {model_path} were not used when"
+                    f" initializing {model.__class__.__name__}: {unexpected_keys}\nThis IS expected if you are"
+                    f" initializing {model.__class__.__name__} from the checkpoint of a model trained on another task or"
+                    " with another architecture (e.g. initializing a BalmForSequenceClassification model from a"
+                    " BalmForMaskedLM model).\nThis IS NOT expected if you are initializing"
+                    f" {model.__class__.__name__} from the checkpoint of a model that you expect to be exactly identical"
+                    " (e.g. initializing a BalmForSequenceClassification model from a BalmForSequenceClassification model).\n"
+                )
         else:
-            print(
-                f"All model checkpoint weights were used when initializing {model.__class__.__name__}.\n"
-            )
+            if not quiet:
+                print(
+                    f"All model checkpoint weights were used when initializing {model.__class__.__name__}.\n"
+                )
         if len(extra_keys.missing_keys) > 0:
             missing_keys = "\n  - " + "\n  - ".join(extra_keys.missing_keys)
-            print(
-                f"Some weights of {model.__class__.__name__} were not initialized from the model checkpoint at"
-                f" {model_path} and are newly initialized: {missing_keys}\nYou should probably"
-                " TRAIN this model on a downstream task to be able to use it for predictions and inference."
-            )
+            if not quiet:
+                print(
+                    f"Some weights of {model.__class__.__name__} were not initialized from the model checkpoint at"
+                    f" {model_path} and are newly initialized: {missing_keys}\nYou should probably"
+                    " TRAIN this model on a downstream task to be able to use it for predictions and inference."
+                )
         else:
-            print(
-                f"All the weights of {model.__class__.__name__} were initialized from the model checkpoint at"
-                f" {model_path}.\nIf your task is similar to the task the model of the checkpoint"
-                f" was trained on, you can already use {model.__class__.__name__} for predictions without further"
-                " training."
-            )
+            if not quiet:
+                print(
+                    f"All the weights of {model.__class__.__name__} were initialized from the model checkpoint at"
+                    f" {model_path}.\nIf your task is similar to the task the model of the checkpoint"
+                    f" was trained on, you can already use {model.__class__.__name__} for predictions without further"
+                    " training."
+                )
 
         # models are often saved in eval mode, so we set them back to train mode
         # otherwise, all parameters may have requires_grad=False and the model won't train
