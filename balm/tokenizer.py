@@ -13,7 +13,8 @@ from tokenizers.processors import TemplateProcessing
 from transformers import PreTrainedTokenizerFast
 
 __all__ = [
-    "Tokenizer",
+    "BalmTokenizer",
+    "DEFAULT_VOCAB",
 ]
 
 
