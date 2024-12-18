@@ -7,8 +7,10 @@ from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from transformers import PretrainedConfig
 
-from .activation import SwiGLU
+from .activation import SwiGLU, get_activation_fn
 from .embedding import RelativePositionalEmbedding, RotaryPositionalEmbedding
 from .router import ExpertChoiceRouter, TopKRouter
 
@@ -28,6 +30,92 @@ __all__ = [
 ]
 
 
+# # =================================
+# #
+# #           ATTENTION
+# #
+# # =================================
+
+
+# class MultiHeadSelfAttention(nn.Module):
+#     def __init__(self, config: PretrainedConfig):
+#         super().__init__()
+#         self.config = config
+#         self.num_heads = config.num_attention_heads
+#         self.head_dim = config.hidden_size // config.num_attention_heads
+#         self.all_head_dim = self.num_heads * self.head_dim
+
+#         self.query = nn.Linear(config.hidden_size, self.all_head_dim)
+#         self.key = nn.Linear(config.hidden_size, self.all_head_dim)
+#         self.value = nn.Linear(config.hidden_size, self.all_head_dim)
+
+#         self.dropout = nn.Dropout(config.attention_dropout)
+#         self.out_proj = nn.Linear(self.all_head_dim, config.hidden_size)
+
+#         self.rotary = (
+#             RotaryPositionalEmbedding(self.head_dim)
+#             if config.position_embedding_type == "rotary"
+#             else None
+#         )
+#         self.relative = (
+#             RelativePositionalEmbedding(
+#                 self.num_heads, max_position=config.max_position_embeddings
+#             )
+#             if config.position_embedding_type == "relative"
+#             else None
+#         )
+
+#     def forward(self, hidden_states, attention_mask=None):
+#         b, s, h = hidden_states.size()
+
+#         q = self.query(hidden_states).view(b, s, self.num_heads, self.head_dim)
+#         k = self.key(hidden_states).view(b, s, self.num_heads, self.head_dim)
+#         v = self.value(hidden_states).view(b, s, self.num_heads, self.head_dim)
+
+#         if self.rotary is not None:
+#             q = self.rotary(q, s)
+#             k = self.rotary(k, s)
+
+#         # prepare attention_mask and relative positions
+#         # scaled_dot_product_attention expects attn_mask shape: [B, num_heads, S, S]
+#         if attention_mask is not None:
+#             # attention_mask is typically [b, 1, 1, s], expand it
+#             # we need [b, num_heads, s, s]
+#             attention_mask = attention_mask.expand(b, self.num_heads, s, s)
+
+#         if self.relative is not None:
+#             rel_pos_bias = self.relative(s)  # [s, s, h]
+#             rel_pos_bias = rel_pos_bias.permute(2, 0, 1).unsqueeze(0)  # [1, h, s, s]
+#             rel_pos_bias = rel_pos_bias.expand(b, -1, s, s)  # [b, h, s, s]
+#             # Add relative bias to attention_mask (both are additive)
+#             if attention_mask is None:
+#                 attention_mask = rel_pos_bias
+#             else:
+#                 attention_mask = attention_mask + rel_pos_bias
+
+#         # transpose to [b, h, s, d] for scaled_dot_product_attention
+#         q = q.transpose(1, 2)  # [b, h, s, d]
+#         k = k.transpose(1, 2)  # [b, h, s, d]
+#         v = v.transpose(1, 2)  # [b, h, s, d]
+
+#         # use scaled_dot_product_attention (flash attention if available, else SDPA)
+#         # torch will automatically use fast paths if conditions are met.
+#         attn_output = F.scaled_dot_product_attention(
+#             q,
+#             k,
+#             v,
+#             attn_mask=attention_mask,  # additive mask
+#             dropout_p=self.dropout.p,
+#             is_causal=False,
+#         )  # attn_output: [b, h, s, d]
+
+#         # reshape back
+#         attn_output = attn_output.transpose(1, 2).contiguous().view(b, s, h)
+#         out = self.out_proj(attn_output)
+#         out = self.dropout(out)
+#         return out
+
+
 # =================================
 #
 #             HEADS
@@ -36,25 +124,69 @@ __all__ = [
 
 
 class BalmLMHead(nn.Module):
-    """Head for masked language modeling."""
+    """
+    Head for masked language modeling.
 
-    def __init__(self, embed_dim: int, output_dim: int):
+    Parameters
+    ----------
+    embed_dim : int
+        Embedding dimension.
+
+    output_dim : int
+        Output dimension.
+
+    """
+
+    def __init__(self, embed_dim: int, output_dim: int, activation: str = "gelu"):
         super().__init__()
         self.dense = nn.Linear(embed_dim, embed_dim)
         self.layer_norm = nn.LayerNorm(embed_dim)
         self.decoder = nn.Linear(embed_dim, output_dim, bias=False)
         self.bias = nn.Parameter(torch.zeros(output_dim))
-        self.gelu = nn.GELU()
+        self.activation = get_activation_fn(activation)
 
-    def forward(self, features):
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        """
+        BalmLMHead forward pass.
+
+        Parameters
+        ----------
+        features : torch.Tensor
+            Features tensor of shape (batch_size, sequence_length, embed_dim).
+
+        Returns
+        -------
+        x : torch.Tensor
+            Output tensor of shape (batch_size, sequence_length, output_dim).
+
+        """
         x = self.dense(features)
-        x = self.gelu(x)
+        x = self.activation(x)
         x = self.layer_norm(x)
         x = self.decoder(x) + self.bias
         return x
 
 
 class BalmSequenceClassificationHead(nn.Module):
+    """
+    Head for sequence-level classification tasks.
+
+    Parameters
+    ----------
+    embed_dim : int
+        Embedding dimension.
+
+    num_labels : int
+        Number of labels.
+
+    dropout : float, optional
+        Dropout rate. The default is 0.0.
+
+    activation : str, optional
+        Activation function to use. The default is "tanh".
+
+    """
+
     def __init__(
         self,
         embed_dim: int,
@@ -68,23 +200,70 @@ class BalmSequenceClassificationHead(nn.Module):
         self.out_proj = nn.Linear(embed_dim, num_labels)
 
         # activation
-        if activation.lower() == "gelu":
-            self.activation = nn.GELU()
-        elif activation.lower() == "relu":
-            self.activation = nn.ReLU()
-        elif activation.lower() == "tanh":
-            self.activation = nn.Tanh()
-        else:
-            raise ValueError(
-                f"Invalid activation function: {activation}. Valid options are 'gelu', 'relu', 'tanh'."
-            )
+        self.activation = get_activation_fn(activation)
 
-    def forward(self, features: torch.Tensor) -> torch.Tensor:
-        x = features[:, 0, :]  # first token (<s> or <cls>) is the seq representative
+    def forward(self, features: torch.Tensor, **kwargs) -> torch.Tensor:
+        """
+        BalmSequenceClassificationHead forward pass.
+
+        Parameters
+        ----------
+        features : torch.Tensor
+            Features tensor of shape (batch_size, sequence_length, embed_dim).
+
+        Returns
+        -------
+        x : torch.Tensor
+            Output tensor of shape (batch_size, num_labels).
+
+        """
+        x = features[:, 0, :]  # BOS token is the sequence representative
         x = self.dropout(x)
         x = self.dense(x)
         x = self.activation(x)
         x = self.dropout(x)
+        x = self.out_proj(x)
+        return x
+
+
+class BalmTokenClassificationHead(nn.Module):
+    """
+    Head for token-level classification tasks.
+
+    Parameters
+        ----------
+        embed_dim : int
+            Embedding dimension.
+
+        num_labels : int
+            Number of labels.
+
+        dropout : float, optional
+            Dropout rate. The default is 0.0.
+
+    """
+
+    def __init__(self, embed_dim: int, num_labels: int, dropout: float = 0.0):
+        super().__init__()
+        self.dropout = nn.Dropout(dropout)
+        self.out_proj = nn.Linear(embed_dim, num_labels)
+
+    def forward(self, features: torch.Tensor, **kwargs) -> torch.Tensor:
+        """
+        BalmTokenClassificationHead forward pass.
+
+        Parameters
+        ----------
+        features : torch.Tensor
+            Features tensor of shape (batch_size, sequence_length, embed_dim).
+
+        Returns
+        -------
+        x : torch.Tensor
+            Output tensor of shape (batch_size, sequence_length, num_labels).
+
+        """
+        x = self.dropout(features)
         x = self.out_proj(x)
         return x
 
@@ -102,38 +281,29 @@ class Expert(nn.Module):
 
     Parameters:
     -----------
-    embed_dim : int
-        Embedding dimension.
+    config : PretrainedConfig
+        Configuration object.
 
-    ffn_embed_dim : int
-        Feed-forward network embedding dimension. Typically 4x the embedding dimension.
-
-    dropout_rate : float
-        Dropout rate. The default is ``0.0``.
-
-    activation : str, optional
-        Activation function to use. One of "swiglu", "relu", or "gelu". The default is "gelu".
     """
 
     def __init__(
         self,
-        embed_dim: int,
-        ffn_dim: int,
-        dropout: float = 0.0,
-        activation: str = "swiglu",
+        config: PretrainedConfig,
     ):
         super().__init__()
-        out_ffn_dim = ffn_dim
-        if activation.lower() == "swiglu":
-            out_ffn_dim = ffn_dim // 2
-            self.activation = SwiGLU()
-        elif activation.lower() == "gelu":
-            self.activation = nn.GELU()
-        else:
-            self.activation = nn.ReLU()
-        self.wi = nn.Linear(embed_dim, ffn_dim, bias=False)
-        self.wo = nn.Linear(out_ffn_dim, embed_dim, bias=False)
-        self.dropout = nn.Dropout(dropout)
+        factor = 2 if config.expert_activation.lower() == "swiglu" else 1
+        self.wi = nn.Linear(
+            config.hidden_size,
+            config.intermediate_size * factor,
+            bias=config.expert_bias,
+        )
+        self.wo = nn.Linear(
+            config.intermediate_size,
+            config.hidden_size,
+            bias=config.expert_bias,
+        )
+        self.activation = get_activation_fn(config.expert_activation)
+        self.dropout = nn.Dropout(config.expert_dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -152,14 +322,74 @@ class Expert(nn.Module):
         x = self.wi(x)
         x = self.activation(x)
         x = self.dropout(x)
-        if (
-            isinstance(self.wo.weight, torch.Tensor)
-            and x.dtype != self.wo.weight.dtype
-            and self.wo.weight.dtype != torch.int8
-        ):
-            x = x.to(self.wo.weight.dtype)
         x = self.wo(x)
         return x
+
+
+# class Expert(nn.Module):
+#     """
+#     Expert module for a Sparse Transformer layer.
+
+#     Parameters:
+#     -----------
+#     embed_dim : int
+#         Embedding dimension.
+
+#     ffn_embed_dim : int
+#         Feed-forward network embedding dimension. Typically 4x the embedding dimension.
+
+#     dropout_rate : float
+#         Dropout rate. The default is ``0.0``.
+
+#     activation : str, optional
+#         Activation function to use. One of "swiglu", "relu", or "gelu". The default is "gelu".
+#     """
+
+#     def __init__(
+#         self,
+#         embed_dim: int,
+#         ffn_dim: int,
+#         dropout: float = 0.0,
+#         activation: str = "swiglu",
+#     ):
+#         super().__init__()
+#         out_ffn_dim = ffn_dim
+#         if activation.lower() == "swiglu":
+#             out_ffn_dim = ffn_dim // 2
+#             self.activation = SwiGLU()
+#         elif activation.lower() == "gelu":
+#             self.activation = nn.GELU()
+#         else:
+#             self.activation = nn.ReLU()
+#         self.wi = nn.Linear(embed_dim, ffn_dim, bias=False)
+#         self.wo = nn.Linear(out_ffn_dim, embed_dim, bias=False)
+#         self.dropout = nn.Dropout(dropout)
+
+#     def forward(self, x: torch.Tensor) -> torch.Tensor:
+#         """
+#         Process the input hidden states.
+
+#         Parameters:
+#         -----------
+#         x : torch.Tensor
+#             Input tensor of shape (batch_size, sequence_length, embed_dim).
+
+#         Returns:
+#         --------
+#         x : torch.Tensor
+#             Output tensor of shape (batch_size, sequence_length, embed_dim).
+#         """
+#         x = self.wi(x)
+#         x = self.activation(x)
+#         x = self.dropout(x)
+#         if (
+#             isinstance(self.wo.weight, torch.Tensor)
+#             and x.dtype != self.wo.weight.dtype
+#             and self.wo.weight.dtype != torch.int8
+#         ):
+#             x = x.to(self.wo.weight.dtype)
+#         x = self.wo(x)
+#         return x
 
 
 # =================================
@@ -171,93 +401,28 @@ class Expert(nn.Module):
 
 class SparseMLP(nn.Module):
     """
-    Implementation of a Sparse MLP module, for use in Mixture-of-Experts models.
+    Sparse MLP layer, consisting of a router and a set of experts.
 
     Parameters:
     -----------
-    embed_dim : int
-        Embedding dimension.
+    config : PretrainedConfig
+        Configuration object.
 
-    ffn_dim : int
-        Feedforward dimension.
-
-    num_experts : int
-        Number of experts.
-
-    expert_capacity : int
-        Capacity of each expert.
-
-    top_k : int, optional
-        Top k for the router. The default is 1.
-
-    activation : str, optional
-        Activation function to use. The default is "swiglu".
-
-    expert_ffn_dropout : float, optional
-        Dropout rate for the expert feedforward layer. The default is 0.0.
-
-    router_dtype : str, optional
-        Dtype for the router. The default is "float32".
-
-    router_bias : bool, optional
-        Whether to use bias for the router. The default is False.
-
-    router_jitter : float, optional
-        Jitter for the router. The default is 0.0.
-
-    router_ignore_padding_tokens : bool, optional
-        Whether to ignore padding tokens for the router. The default is True.
-
-    router_class : nn.Module, optional
-        Router class to use. The default is ``TopKRouter``.
-
-    expert_class : nn.Module, optional
-        Expert class to use. The default is ``Expert``.
     """
 
-    def __init__(
-        self,
-        embed_dim: int,
-        ffn_dim: int,
-        num_experts: int,
-        expert_capacity: int,
-        num_shared_experts: int = 0,
-        send_bos_to_all_experts: bool = True,
-        top_k: int = 1,
-        activation: str = "swiglu",
-        expert_ffn_dropout: float = 0.0,
-        router_dtype: str = "float32",
-        router_bias: bool = False,
-        router_jitter: float = 0.0,
-        router_ignore_padding_tokens: bool = True,
-        router_class: nn.Module = TopKRouter,
-        expert_class: nn.Module = Expert,
-    ):
+    def __init__(self, config: PretrainedConfig):
         super().__init__()
-        self.router = router_class(
-            embed_dim=embed_dim,
-            num_experts=num_experts,
-            expert_capacity=expert_capacity,
-            top_k=top_k,
-            num_shared_experts=num_shared_experts,
-            send_bos_to_all_experts=send_bos_to_all_experts,
-            dtype=router_dtype,
-            bias=router_bias,
-            jitter=router_jitter,
-            ignore_padding_tokens=router_ignore_padding_tokens,
-        )
-        self.experts = nn.ModuleDict()
-        for idx in range(num_experts):
-            self.experts[f"expert_{idx}"] = expert_class(
-                embed_dim=embed_dim,
-                ffn_dim=ffn_dim,
-                dropout=expert_ffn_dropout,
-                activation=activation,
-            )
+        self.config = config
+        self.num_experts = config.num_experts
+        self.experts = nn.ModuleList([Expert(config) for _ in range(self.num_experts)])
+        if config.router_type == "expert choice":
+            self.router = ExpertChoiceRouter(config)
+        else:
+            self.router = TopKRouter(config)
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, Tuple]:
         """
-        Route tokens to experts and process them.
+        Sparse MLP forward pass.
 
         Parameters:
         -----------
@@ -268,14 +433,15 @@ class SparseMLP(nn.Module):
         --------
         output : Tuple[torch.Tensor, Tuple]
             A tuple containing the following:
-             - x : torch.Tensor
+            - x : torch.Tensor
                 Output tensor of shape (batch_size, sequence_length, embed_dim).
-             - router_outputs : Tuple[torch.Tensor, torch.Tensor]
+            - router_outputs : Tuple[torch.Tensor, torch.Tensor]
                 A tuple containing the following:
-                 - router_logits : torch.Tensor
-                    Router logits of shape (batch_size, sequence_length, num_experts).
-                 - expert_mask : torch.Tensor
-                    Expert mask of shape (batch_size, sequence_length, num_experts).
+                    - router_logits : torch.Tensor
+                        Router logits of shape (batch_size, sequence_length, num_experts).
+                    - expert_mask : torch.Tensor
+                        Expert mask of shape (batch_size, sequence_length, num_experts).
+
         """
         # router
         expert_mask, router_probs, router_logits = self.router(x)
@@ -298,6 +464,165 @@ class SparseMLP(nn.Module):
         return x, (router_logits, expert_mask)
 
 
+# b, s, h = hidden_states.size()  # [batch_size, sequence_length, embed_dim]
+# if self.config.expert_capacity_type == "absolute":
+#     capacity = int(self.config.expert_capacity)
+# else:
+#     capacity = int(self.config.expert_capacity * s / self.config.num_experts)
+
+# dispatch_mask, combine_weights, aux_loss, z_loss = self.router(
+#     hidden_states, seq_len=s, capacity=capacity
+# )
+
+# expert_outputs = []
+# for i, expert in enumerate(self.experts):
+#     expert_mask = dispatch_mask[..., i]  # [b, s]
+#     tokens_for_expert = hidden_states[expert_mask]  # [num_tokens_for_expert, h]
+#     if tokens_for_expert.size(0) > 0:
+#         out = expert(tokens_for_expert)
+#     else:
+#         out = torch.zeros_like(tokens_for_expert)
+#     expert_outputs.append(out)
+
+# combined_output = torch.zeros_like(hidden_states)
+# for i, expert_out in enumerate(expert_outputs):
+#     expert_mask = dispatch_mask[..., i]
+#     cw = combine_weights[expert_mask, i].unsqueeze(-1)
+#     combined_output[expert_mask] += expert_out * cw
+
+# # combined output -> [batch_size, sequence_length, embed_dim]
+# return combined_output, aux_loss, z_loss
+
+
+# class SparseMLP(nn.Module):
+#     """
+#     Implementation of a Sparse MLP module, for use in Mixture-of-Experts models.
+
+#     Parameters:
+#     -----------
+#     embed_dim : int
+#         Embedding dimension.
+
+#     ffn_dim : int
+#         Feedforward dimension.
+
+#     num_experts : int
+#         Number of experts.
+
+#     expert_capacity : int
+#         Capacity of each expert.
+
+#     top_k : int, optional
+#         Top k for the router. The default is 1.
+
+#     activation : str, optional
+#         Activation function to use. The default is "swiglu".
+
+#     expert_ffn_dropout : float, optional
+#         Dropout rate for the expert feedforward layer. The default is 0.0.
+
+#     router_dtype : str, optional
+#         Dtype for the router. The default is "float32".
+
+#     router_bias : bool, optional
+#         Whether to use bias for the router. The default is False.
+
+#     router_jitter : float, optional
+#         Jitter for the router. The default is 0.0.
+
+#     router_ignore_padding_tokens : bool, optional
+#         Whether to ignore padding tokens for the router. The default is True.
+
+#     router_class : nn.Module, optional
+#         Router class to use. The default is ``TopKRouter``.
+
+#     expert_class : nn.Module, optional
+#         Expert class to use. The default is ``Expert``.
+#     """
+
+#     def __init__(
+#         self,
+#         embed_dim: int,
+#         ffn_dim: int,
+#         num_experts: int,
+#         expert_capacity: int,
+#         num_shared_experts: int = 0,
+#         send_bos_to_all_experts: bool = True,
+#         top_k: int = 1,
+#         activation: str = "swiglu",
+#         expert_ffn_dropout: float = 0.0,
+#         router_dtype: str = "float32",
+#         router_bias: bool = False,
+#         router_jitter: float = 0.0,
+#         router_ignore_padding_tokens: bool = True,
+#         router_class: nn.Module = TopKRouter,
+#         expert_class: nn.Module = Expert,
+#     ):
+#         super().__init__()
+#         self.router = router_class(
+#             embed_dim=embed_dim,
+#             num_experts=num_experts,
+#             expert_capacity=expert_capacity,
+#             top_k=top_k,
+#             num_shared_experts=num_shared_experts,
+#             send_bos_to_all_experts=send_bos_to_all_experts,
+#             dtype=router_dtype,
+#             bias=router_bias,
+#             jitter=router_jitter,
+#             ignore_padding_tokens=router_ignore_padding_tokens,
+#         )
+#         self.experts = nn.ModuleDict()
+#         for idx in range(num_experts):
+#             self.experts[f"expert_{idx}"] = expert_class(
+#                 embed_dim=embed_dim,
+#                 ffn_dim=ffn_dim,
+#                 dropout=expert_ffn_dropout,
+#                 activation=activation,
+#             )
+
+#     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, Tuple]:
+#         """
+#         Route tokens to experts and process them.
+
+#         Parameters:
+#         -----------
+#         x : torch.Tensor
+#             Input tensor of shape (batch_size, sequence_length, embed_dim).
+
+#         Returns:
+#         --------
+#         output : Tuple[torch.Tensor, Tuple]
+#             A tuple containing the following:
+#              - x : torch.Tensor
+#                 Output tensor of shape (batch_size, sequence_length, embed_dim).
+#              - router_outputs : Tuple[torch.Tensor, torch.Tensor]
+#                 A tuple containing the following:
+#                  - router_logits : torch.Tensor
+#                     Router logits of shape (batch_size, sequence_length, num_experts).
+#                  - expert_mask : torch.Tensor
+#                     Expert mask of shape (batch_size, sequence_length, num_experts).
+#         """
+#         # router
+#         expert_mask, router_probs, router_logits = self.router(x)
+#         expert_outputs = []
+
+#         # experts
+#         for idx, expert in self.experts.items():
+#             int_idx = int(idx.split("_")[-1])
+#             token_indices = expert_mask[..., int_idx].bool()
+#             expert_output = expert(x[token_indices]).to(x.dtype)
+#             expanded_output = torch.zeros_like(x)
+#             expanded_output[token_indices] = expert_output
+#             expert_outputs.append(expanded_output)
+
+#         # combine outputs from the selected tokens for each expert
+#         x = torch.stack(expert_outputs, dim=-1) * expert_mask.unsqueeze(-2)
+#         # multiply by router probs before summing
+#         x = torch.sum(x * router_probs.unsqueeze(-2), dim=-1)
+
+#         return x, (router_logits, expert_mask)
+
+
 # =================================
 #
 #       TRANSFORMER LAYERS
@@ -306,103 +631,102 @@ class SparseMLP(nn.Module):
 
 
 class DenseTransformerLayer(nn.Module):
-    def __init__(
-        self,
-        embed_dim: int,
-        ffn_dim: int,
-        num_heads: int,
-        max_length: int,
-        dropout: float = 0.1,
-        attention_dropout: float = 0.0,
-        token_embedding_dropout: float = 0.0,
-        layer_norm_eps: float = 1e-5,
-        activation: str = "swiglu",
-        positional_embedding_type: Optional[str] = "rotary",
-        pre_norm: bool = True,
-    ):
+    """
+    Dense transformer layer.
+
+    Parameters:
+    -----------
+    config : PretrainedConfig
+        Model configuration class with all the parameters of the model.
+
+    """
+
+    def __init__(self, config: PretrainedConfig):
         super().__init__()
-        self.pre_norm = pre_norm
+        self.config = config
 
         # embeddings
-        if positional_embedding_type is None:
-            self.positional_embeddings = None
-        elif positional_embedding_type.lower() == "rotary":
-            self.positional_embeddings = RotaryPositionalEmbedding(
-                embed_dim, max_length
-            )
-        elif positional_embedding_type.lower() == "relative":
-            self.positional_embeddings = RelativePositionalEmbedding(
-                embed_dim, max_length
-            )
-        else:
-            raise ValueError(
-                f"Invalid positional embedding type: {positional_embedding_type}. Valid options are 'rotary', 'relative', or None."
-            )
+        if config.position_embedding_type == "rotary":
+            self.rotary_embeddings = RotaryPositionalEmbedding(config.hidden_size)
 
         # norm
-        self.norm1 = nn.LayerNorm(embed_dim, eps=layer_norm_eps)
-        self.norm2 = nn.LayerNorm(embed_dim, eps=layer_norm_eps)
+        self.norm1 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.norm2 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
         # attention
+        # NOTE: if config.output_attentions is True, torch can't use optimized SDPA
+        # see -> https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html
         self.attention = nn.MultiheadAttention(
-            embed_dim=embed_dim,
-            num_heads=num_heads,
-            dropout=attention_dropout,
+            embed_dim=config.hidden_size,
+            num_heads=config.num_attention_heads,
+            dropout=config.attention_dropout,
             batch_first=True,
         )
 
-        # activation
-        post_activation_ffn_dim = ffn_dim
-        if activation.lower() == "gelu":
-            self.activation_fn = nn.GELU()
-        elif activation.lower() == "swiglu":
-            self.activation_fn = SwiGLU()
-            post_activation_ffn_dim = ffn_dim // 2
-        elif activation.lower() == "relu":
-            self.activation_fn = nn.ReLU()
-        else:
-            raise ValueError(
-                f"Invalid activation function: {activation}. Valid options are 'swiglu', 'gelu', or 'relu'."
-            )
-
         # feedforward
+        factor = 2 if config.expert_activation == "swiglu" else 1
+        self.activation = get_activation_fn(config.activation)
         self.feed_forward = nn.Sequential(
-            nn.Linear(embed_dim, ffn_dim),
-            self.activation_fn,
-            nn.Linear(post_activation_ffn_dim, embed_dim),
+            nn.Linear(config.hidden_size, config.intermediate_size * factor),
+            self.activation,
+            nn.Dropout(config.hidden_dropout),
+            nn.Linear(config.intermediate_size, config.hidden_size),
         )
 
         # dropout
-        self.dropout = nn.Dropout(dropout)
-        self.embedding_dropout = nn.Dropout(token_embedding_dropout)
+        self.dropout = nn.Dropout(config.dropout)
 
     def forward(
         self,
         x: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
-        key_padding_mask: Optional[torch.Tensor] = None,
-        need_weights: bool = False,
     ):
+        """
+        Process the input hidden states.
+
+        Parameters:
+        -----------
+        x : torch.Tensor
+            Input tensor of shape (batch_size, sequence_length, embed_dim).
+
+        attention_mask : torch.Tensor, optional
+            Attention mask of shape (batch_size, sequence_length). The default is None.
+
+        Returns:
+        --------
+        output : Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+            If ``config.output_attentions`` is ``True``, the output will be a tuple of
+            (x, attn). Otherwise, the output will be just x.
+
+            x : torch.Tensor
+                Output tensor of shape (batch_size, sequence_length, embed_dim).
+            attn : torch.Tensor
+                Attention weights of shape (batch_size, num_heads, sequence_length, sequence_length).
+
+        """
         # pre-norm
         residual = x
-        if self.pre_norm:
+        if self.config.pre_norm:
             x = self.norm1(x)
 
         # positional embeddings
-        if self.positional_embeddings is not None:
-            x = self.embedding_dropout(self.positional_embeddings(x))
+        if self.config.position_embedding_type == "rotary":
+            k = self.rotary_embeddings(x)
+            q = self.rotary_embeddings(x)
+            v = x
+        else:
+            k, q, v = x, x, x
 
         # attention
         x = self.attention(
-            x,
-            x,
-            x,
-            attn_mask=attention_mask,
-            key_padding_mask=key_padding_mask,
-            need_weights=need_weights,
+            k,
+            q,
+            v,
+            key_padding_mask=attention_mask,
+            need_weights=self.config.output_attentions,
         )
-        if need_weights:
-            x, weights = x
+        if self.config.output_attentions:
+            x, attn = x
         else:
             x = x[0]
         x = residual + self.dropout(x)
@@ -425,106 +749,182 @@ class DenseTransformerLayer(nn.Module):
             x = self.norm2(x)
 
         # outputs
-        if need_weights:
-            return x, weights
+        if self.config.output_attentions:
+            return x, attn
         return x
+
+
+# class DenseTransformerLayer(nn.Module):
+#     def __init__(
+#         self,
+#         embed_dim: int,
+#         ffn_dim: int,
+#         num_heads: int,
+#         max_length: int,
+#         dropout: float = 0.1,
+#         attention_dropout: float = 0.0,
+#         token_embedding_dropout: float = 0.0,
+#         layer_norm_eps: float = 1e-5,
+#         activation: str = "swiglu",
+#         positional_embedding_type: Optional[str] = "rotary",
+#         pre_norm: bool = True,
+#     ):
+#         super().__init__()
+#         self.pre_norm = pre_norm
+
+#         # embeddings
+#         if positional_embedding_type is None:
+#             self.positional_embeddings = None
+#         elif positional_embedding_type.lower() == "rotary":
+#             self.positional_embeddings = RotaryPositionalEmbedding(
+#                 embed_dim, max_length
+#             )
+#         elif positional_embedding_type.lower() == "relative":
+#             self.positional_embeddings = RelativePositionalEmbedding(
+#                 embed_dim, max_length
+#             )
+#         else:
+#             raise ValueError(
+#                 f"Invalid positional embedding type: {positional_embedding_type}. Valid options are 'rotary', 'relative', or None."
+#             )
+
+#         # norm
+#         self.norm1 = nn.LayerNorm(embed_dim, eps=layer_norm_eps)
+#         self.norm2 = nn.LayerNorm(embed_dim, eps=layer_norm_eps)
+
+#         # attention
+#         self.attention = nn.MultiheadAttention(
+#             embed_dim=embed_dim,
+#             num_heads=num_heads,
+#             dropout=attention_dropout,
+#             batch_first=True,
+#         )
+
+#         # activation
+#         post_activation_ffn_dim = ffn_dim
+#         if activation.lower() == "gelu":
+#             self.activation_fn = nn.GELU()
+#         elif activation.lower() == "swiglu":
+#             self.activation_fn = SwiGLU()
+#             post_activation_ffn_dim = ffn_dim // 2
+#         elif activation.lower() == "relu":
+#             self.activation_fn = nn.ReLU()
+#         else:
+#             raise ValueError(
+#                 f"Invalid activation function: {activation}. Valid options are 'swiglu', 'gelu', or 'relu'."
+#             )
+
+#         # feedforward
+#         self.feed_forward = nn.Sequential(
+#             nn.Linear(embed_dim, ffn_dim),
+#             self.activation_fn,
+#             nn.Linear(post_activation_ffn_dim, embed_dim),
+#         )
+
+#         # dropout
+#         self.dropout = nn.Dropout(dropout)
+#         self.embedding_dropout = nn.Dropout(token_embedding_dropout)
+
+#     def forward(
+#         self,
+#         x: torch.Tensor,
+#         attention_mask: Optional[torch.Tensor] = None,
+#         key_padding_mask: Optional[torch.Tensor] = None,
+#         need_weights: bool = False,
+#     ):
+#         # pre-norm
+#         residual = x
+#         if self.pre_norm:
+#             x = self.norm1(x)
+
+#         # positional embeddings
+#         if self.positional_embeddings is not None:
+#             x = self.embedding_dropout(self.positional_embeddings(x))
+
+#         # attention
+#         x = self.attention(
+#             x,
+#             x,
+#             x,
+#             attn_mask=attention_mask,
+#             key_padding_mask=key_padding_mask,
+#             need_weights=need_weights,
+#         )
+#         if need_weights:
+#             x, weights = x
+#         else:
+#             x = x[0]
+#         x = residual + self.dropout(x)
+
+#         # post-norm
+#         if not self.pre_norm:
+#             x = self.norm1(x)
+
+#         # pre-norm
+#         residual = x
+#         if self.pre_norm:
+#             x = self.norm2(x)
+
+#         # feedforward
+#         x = self.feed_forward(x)
+#         x = residual + self.dropout(x)
+
+#         # post-norm
+#         if not self.pre_norm:
+#             x = self.norm2(x)
+
+#         # outputs
+#         if need_weights:
+#             return x, weights
+#         return x
 
 
 class SparseTransformerLayer(nn.Module):
     """
-    BALM transformer layer with Mixture of Experts. Approximately follows the ESM-2
-    implementation, but differs in a few ways:
-        - includes (optional) dropout for self-attention and feedforward layers
-        - normalize **after**, not before, the self-attention and feedforward layers
-        - we don't use rotary embeddings, which aren't (yet?) compatible with
-          torch's optimized implementation of ``nn.MultiheadAttention``
+    Sparse transformer layer.
 
     Parameters:
     -----------
-    config : BalmMoEConfig
+    config : PretrainedConfig
         Model configuration class with all the parameters of the model.
+
     """
 
     def __init__(
         self,
-        embed_dim: int,
-        ffn_dim: int,
-        num_heads: int,
-        max_length: int,
-        num_experts: int,
-        expert_capacity: int,
-        num_shared_experts: int = 0,
-        send_bos_to_all_experts: bool = True,
-        top_k: int = 1,
-        dropout: float = 0.1,
-        attention_dropout: float = 0.0,
-        expert_ffn_dropout: float = 0.0,
-        token_embedding_dropout: float = 0.0,
-        layer_norm_eps: float = 1e-5,
-        activation: str = "swiglu",
-        positional_embedding_type: str = "rotary",
-        pre_norm: bool = True,
-        router_dtype: str = "float32",
-        router_bias: bool = False,
-        router_jitter: float = 0.0,
-        router_ignore_padding_tokens: bool = True,
-        expert_choice_router: bool = False,
+        config: PretrainedConfig,
     ):
         super().__init__()
-        self.pre_norm = pre_norm
+        self.config = config
 
         # embeddings
-        if positional_embedding_type.lower() == "rotary":
-            self.positional_embeddings = RotaryPositionalEmbedding(
-                embed_dim, max_length
-            )
-        else:
-            self.positional_embeddings = RelativePositionalEmbedding(
-                embed_dim, max_length
-            )
+        if config.position_embedding_type == "rotary":
+            self.rotary_embeddings = RotaryPositionalEmbedding(config.hidden_size)
 
         # norm
-        self.norm1 = nn.LayerNorm(embed_dim, eps=layer_norm_eps)
-        self.norm2 = nn.LayerNorm(embed_dim, eps=layer_norm_eps)
+        self.norm1 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.norm2 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
         # attention
-        self.self_attn = nn.MultiheadAttention(
-            embed_dim=embed_dim,
-            num_heads=num_heads,
-            dropout=attention_dropout,
+        # NOTE: if config.output_attentions is True, torch can't use optimized SDPA
+        # see -> https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html
+        self.attention = nn.MultiheadAttention(
+            embed_dim=config.hidden_size,
+            num_heads=config.num_attention_heads,
+            dropout=config.attention_dropout,
             batch_first=True,
         )
 
         # sparse feedforward
-        self.mlp = SparseMLP(
-            embed_dim=embed_dim,
-            ffn_dim=ffn_dim,
-            num_experts=num_experts,
-            num_shared_experts=num_shared_experts,
-            send_bos_to_all_experts=send_bos_to_all_experts,
-            top_k=top_k,
-            expert_capacity=expert_capacity,
-            activation=activation,
-            expert_ffn_dropout=expert_ffn_dropout,
-            router_dtype=router_dtype,
-            router_bias=router_bias,
-            router_jitter=router_jitter,
-            router_ignore_padding_tokens=router_ignore_padding_tokens,
-            router_class=ExpertChoiceRouter if expert_choice_router else TopKRouter,
-            expert_class=Expert,
-        )
+        self.mlp = SparseMLP(config)
 
         # dropout
-        self.dropout = nn.Dropout(dropout)
-        self.embedding_dropout = nn.Dropout(token_embedding_dropout)
+        self.dropout = nn.Dropout(config.dropout)
 
     def forward(
         self,
         x: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
-        key_padding_mask: Optional[torch.Tensor] = None,
-        need_weights: bool = False,
-        output_router_logits: bool = True,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, Tuple]]:
         """
         Process the input hidden states.
@@ -534,38 +934,28 @@ class SparseTransformerLayer(nn.Module):
         x : torch.Tensor
             Input tensor of shape (batch_size, sequence_length, embed_dim).
 
-        attn_mask : torch.Tensor, optional
-            Attention mask of shape (batch_size * num_heads, sequence_length, sequence_length). The default is None.
-
-        key_padding_mask : torch.Tensor, optional
-            Mask of shape (batch_size, sequence_length). The default is None.
-
-        need_weights : bool, optional
-            Whether to return attention weights. The default is False.
-
-            .. note::
-                if `need_weights` is ``True``, the output will be a tuple of (x, attn). Also,
-                nn.MultiHeadAttention will not be able to use the optimized torch implementation
-                of ``scaled_dot_product_attention``. See `here`_ for more details.
-
-        output_router_logits : bool, optional
-            Whether to output router logits. The default is True.
+        attention_mask : torch.Tensor, optional
+            Attention mask of shape (batch_size, sequence_length). The default is None.
 
         Returns:
         --------
-        x : torch.Tensor or Tuple
+        output : Tuple[torch.Tensor, Tuple]
 
-            Output tensor of shape (batch_size, sequence_length, embed_dim). If `need_weights`, is ``True``,
-            output is a tuple of (x, attn). If `output_router_logits` is ``True``, the output will be a tuple
-            of (x, router_logits) or (x, attn, router_logts) depending on the value of `need_weights`.
+            If ``config.output_attentions`` is ``True``, output is a tuple of (x, attn, router_tuple).
+            Otherwise, output is a tuple of (x, router_tuple).
 
+            x: torch.Tensor
+                Output tensor of shape (batch_size, sequence_length, embed_dim).
+            attn: torch.Tensor
+                Attention weights of shape (batch_size, num_heads, sequence_length, sequence_length).
+            router_tuple: Tuple
+                Tuple of router logits and expert mask. Both are of shape
+                (batch_size, sequence_length, num_experts).
 
-        .. _here:
-            https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html#torch.nn.MultiheadAttention.forward
         """
         # pre-norm
         residual = x
-        if self.pre_norm:
+        if self.config.pre_norm:
             x = self.norm1(x)
 
         # positional embeddings
@@ -576,18 +966,17 @@ class SparseTransformerLayer(nn.Module):
             x,
             x,
             x,
-            key_padding_mask=key_padding_mask,
-            need_weights=need_weights,
-            attn_mask=attention_mask,
+            key_padding_mask=attention_mask,
+            need_weights=self.config.output_attentions,
         )
-        if need_weights:
+        if self.config.output_attentions:
             x, attn = x
         else:
             x = x[0]
         x = residual + self.dropout(x)
 
         # post-norm
-        if not self.pre_norm:
+        if not self.config.pre_norm:
             x = self.norm1(x)
 
         # pre-norm
@@ -604,9 +993,188 @@ class SparseTransformerLayer(nn.Module):
             x = self.norm2(residual + x)
 
         # outputs
-        if need_weights:
+        if self.config.output_attentions:
             return (x, attn, router_tuple)
         return (x, router_tuple)
+
+
+# class SparseTransformerLayer(nn.Module):
+#     """
+#     BALM transformer layer with Mixture of Experts. Approximately follows the ESM-2
+#     implementation, but differs in a few ways:
+#         - includes (optional) dropout for self-attention and feedforward layers
+#         - normalize **after**, not before, the self-attention and feedforward layers
+#         - we don't use rotary embeddings, which aren't (yet?) compatible with
+#           torch's optimized implementation of ``nn.MultiheadAttention``
+
+#     Parameters:
+#     -----------
+#     config : BalmMoEConfig
+#         Model configuration class with all the parameters of the model.
+#     """
+
+#     def __init__(
+#         self,
+#         embed_dim: int,
+#         ffn_dim: int,
+#         num_heads: int,
+#         max_length: int,
+#         num_experts: int,
+#         expert_capacity: int,
+#         num_shared_experts: int = 0,
+#         send_bos_to_all_experts: bool = True,
+#         top_k: int = 1,
+#         dropout: float = 0.1,
+#         attention_dropout: float = 0.0,
+#         expert_ffn_dropout: float = 0.0,
+#         token_embedding_dropout: float = 0.0,
+#         layer_norm_eps: float = 1e-5,
+#         activation: str = "swiglu",
+#         positional_embedding_type: str = "rotary",
+#         pre_norm: bool = True,
+#         router_dtype: str = "float32",
+#         router_bias: bool = False,
+#         router_jitter: float = 0.0,
+#         router_ignore_padding_tokens: bool = True,
+#         expert_choice_router: bool = False,
+#     ):
+#         super().__init__()
+#         self.pre_norm = pre_norm
+
+#         # embeddings
+#         if positional_embedding_type.lower() == "rotary":
+#             self.positional_embeddings = RotaryPositionalEmbedding(
+#                 embed_dim, max_length
+#             )
+#         else:
+#             self.positional_embeddings = RelativePositionalEmbedding(
+#                 embed_dim, max_length
+#             )
+
+#         # norm
+#         self.norm1 = nn.LayerNorm(embed_dim, eps=layer_norm_eps)
+#         self.norm2 = nn.LayerNorm(embed_dim, eps=layer_norm_eps)
+
+#         # attention
+#         self.self_attn = nn.MultiheadAttention(
+#             embed_dim=embed_dim,
+#             num_heads=num_heads,
+#             dropout=attention_dropout,
+#             batch_first=True,
+#         )
+
+#         # sparse feedforward
+#         self.mlp = SparseMLP(
+#             embed_dim=embed_dim,
+#             ffn_dim=ffn_dim,
+#             num_experts=num_experts,
+#             num_shared_experts=num_shared_experts,
+#             send_bos_to_all_experts=send_bos_to_all_experts,
+#             top_k=top_k,
+#             expert_capacity=expert_capacity,
+#             activation=activation,
+#             expert_ffn_dropout=expert_ffn_dropout,
+#             router_dtype=router_dtype,
+#             router_bias=router_bias,
+#             router_jitter=router_jitter,
+#             router_ignore_padding_tokens=router_ignore_padding_tokens,
+#             router_class=ExpertChoiceRouter if expert_choice_router else TopKRouter,
+#             expert_class=Expert,
+#         )
+
+#         # dropout
+#         self.dropout = nn.Dropout(dropout)
+#         self.embedding_dropout = nn.Dropout(token_embedding_dropout)
+
+#     def forward(
+#         self,
+#         x: torch.Tensor,
+#         attention_mask: Optional[torch.Tensor] = None,
+#         key_padding_mask: Optional[torch.Tensor] = None,
+#         need_weights: bool = False,
+#         output_router_logits: bool = True,
+#     ) -> Union[torch.Tensor, Tuple[torch.Tensor, Tuple]]:
+#         """
+#         Process the input hidden states.
+
+#         Parameters:
+#         -----------
+#         x : torch.Tensor
+#             Input tensor of shape (batch_size, sequence_length, embed_dim).
+
+#         attn_mask : torch.Tensor, optional
+#             Attention mask of shape (batch_size * num_heads, sequence_length, sequence_length). The default is None.
+
+#         key_padding_mask : torch.Tensor, optional
+#             Mask of shape (batch_size, sequence_length). The default is None.
+
+#         need_weights : bool, optional
+#             Whether to return attention weights. The default is False.
+
+#             .. note::
+#                 if `need_weights` is ``True``, the output will be a tuple of (x, attn). Also,
+#                 nn.MultiHeadAttention will not be able to use the optimized torch implementation
+#                 of ``scaled_dot_product_attention``. See `here`_ for more details.
+
+#         output_router_logits : bool, optional
+#             Whether to output router logits. The default is True.
+
+#         Returns:
+#         --------
+#         x : torch.Tensor or Tuple
+
+#             Output tensor of shape (batch_size, sequence_length, embed_dim). If `need_weights`, is ``True``,
+#             output is a tuple of (x, attn). If `output_router_logits` is ``True``, the output will be a tuple
+#             of (x, router_logits) or (x, attn, router_logts) depending on the value of `need_weights`.
+
+
+#         .. _here:
+#             https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html#torch.nn.MultiheadAttention.forward
+#         """
+#         # pre-norm
+#         residual = x
+#         if self.pre_norm:
+#             x = self.norm1(x)
+
+#         # positional embeddings
+#         x = self.embedding_dropout(self.positional_embeddings(x))
+
+#         # attention
+#         x = self.self_attn(
+#             x,
+#             x,
+#             x,
+#             key_padding_mask=key_padding_mask,
+#             need_weights=need_weights,
+#             attn_mask=attention_mask,
+#         )
+#         if need_weights:
+#             x, attn = x
+#         else:
+#             x = x[0]
+#         x = residual + self.dropout(x)
+
+#         # post-norm
+#         if not self.pre_norm:
+#             x = self.norm1(x)
+
+#         # pre-norm
+#         residual = x
+#         if self.pre_norm:
+#             x = self.norm2(x)
+
+#         # feedforward
+#         x, router_tuple = self.mlp(x)
+#         x = residual + self.dropout(x)
+
+#         # post-norm
+#         if not self.pre_norm:
+#             x = self.norm2(residual + x)
+
+#         # outputs
+#         if need_weights:
+#             return (x, attn, router_tuple)
+#         return (x, router_tuple)
 
 
 class HybridSparseTransformerLayer(nn.Module):
