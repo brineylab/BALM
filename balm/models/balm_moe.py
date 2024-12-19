@@ -657,7 +657,7 @@ class BalmMoEForMaskedLM(PreTrainedModel, FreezeBaseModelMixin):
 
         # LM head
         self.lm_head = BalmLMHead(
-            embed_dim=self.config.embed_dim,
+            hidden_size=self.config.hidden_size,
             output_dim=self.config.vocab_size,
             activation=self.config.classifier_activation,
         )
@@ -780,13 +780,13 @@ class BalmMoEForMaskedLM(PreTrainedModel, FreezeBaseModelMixin):
         return MoEMaskedLMOutput(
             loss=loss,
             logits=lm_logits,
-            z_loss=z_loss,
-            aux_loss=aux_loss,
-            lm_loss=lm_loss,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
             router_logits=outputs.router_logits,
             expert_indexes=outputs.expert_indexes,
+            z_loss=z_loss,
+            aux_loss=aux_loss,
+            lm_loss=lm_loss,
         )
 
         # # outputs
@@ -825,7 +825,7 @@ class BalmMoEForSequenceClassification(PreTrainedModel, FreezeBaseModelMixin):
             else self.config.dropout
         )
         self.classifier = BalmSequenceClassificationHead(
-            embed_dim=self.config.embed_dim,
+            hidden_size=self.config.hidden_size,
             num_labels=self.config.num_labels,
             dropout=classifier_dropout,
             activation=self.config.classifier_activation,
@@ -942,13 +942,13 @@ class BalmMoEForSequenceClassification(PreTrainedModel, FreezeBaseModelMixin):
         return MoESequenceClassifierOutput(
             loss=loss,
             logits=classifier_logits,
-            z_loss=z_loss,
-            aux_loss=aux_loss,
-            classifier_loss=classifier_loss,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
             router_logits=outputs.router_logits,
             expert_indexes=outputs.expert_indexes,
+            z_loss=z_loss,
+            aux_loss=aux_loss,
+            classifier_loss=classifier_loss,
         )
 
         # outputs = self.balm(

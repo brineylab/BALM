@@ -129,19 +129,19 @@ class BalmLMHead(nn.Module):
 
     Parameters
     ----------
-    embed_dim : int
-        Embedding dimension.
+    hidden_size : int
+        Hidden size.
 
     output_dim : int
         Output dimension.
 
     """
 
-    def __init__(self, embed_dim: int, output_dim: int, activation: str = "gelu"):
+    def __init__(self, hidden_size: int, output_dim: int, activation: str = "gelu"):
         super().__init__()
-        self.dense = nn.Linear(embed_dim, embed_dim)
-        self.layer_norm = nn.LayerNorm(embed_dim)
-        self.decoder = nn.Linear(embed_dim, output_dim, bias=False)
+        self.dense = nn.Linear(hidden_size, hidden_size)
+        self.layer_norm = nn.LayerNorm(hidden_size)
+        self.decoder = nn.Linear(hidden_size, output_dim, bias=False)
         self.bias = nn.Parameter(torch.zeros(output_dim))
         self.activation = get_activation_fn(activation)
 
@@ -152,7 +152,7 @@ class BalmLMHead(nn.Module):
         Parameters
         ----------
         features : torch.Tensor
-            Features tensor of shape (batch_size, sequence_length, embed_dim).
+            Features tensor of shape (batch_size, sequence_length, hidden_size).
 
         Returns
         -------
@@ -173,8 +173,8 @@ class BalmSequenceClassificationHead(nn.Module):
 
     Parameters
     ----------
-    embed_dim : int
-        Embedding dimension.
+    hidden_size : int
+        Hidden size.
 
     num_labels : int
         Number of labels.
@@ -189,15 +189,15 @@ class BalmSequenceClassificationHead(nn.Module):
 
     def __init__(
         self,
-        embed_dim: int,
+        hidden_size: int,
         num_labels: int,
         dropout: float = 0.0,
         activation: str = "tanh",
     ):
         super().__init__()
-        self.dense = nn.Linear(embed_dim, embed_dim)
+        self.dense = nn.Linear(hidden_size, hidden_size)
         self.dropout = nn.Dropout(dropout)
-        self.out_proj = nn.Linear(embed_dim, num_labels)
+        self.out_proj = nn.Linear(hidden_size, num_labels)
 
         # activation
         self.activation = get_activation_fn(activation)
@@ -209,7 +209,7 @@ class BalmSequenceClassificationHead(nn.Module):
         Parameters
         ----------
         features : torch.Tensor
-            Features tensor of shape (batch_size, sequence_length, embed_dim).
+            Features tensor of shape (batch_size, sequence_length, hidden_size).
 
         Returns
         -------
@@ -232,8 +232,8 @@ class BalmTokenClassificationHead(nn.Module):
 
     Parameters
         ----------
-        embed_dim : int
-            Embedding dimension.
+        hidden_size : int
+            Hidden size.
 
         num_labels : int
             Number of labels.
@@ -243,10 +243,10 @@ class BalmTokenClassificationHead(nn.Module):
 
     """
 
-    def __init__(self, embed_dim: int, num_labels: int, dropout: float = 0.0):
+    def __init__(self, hidden_size: int, num_labels: int, dropout: float = 0.0):
         super().__init__()
         self.dropout = nn.Dropout(dropout)
-        self.out_proj = nn.Linear(embed_dim, num_labels)
+        self.out_proj = nn.Linear(hidden_size, num_labels)
 
     def forward(self, features: torch.Tensor, **kwargs) -> torch.Tensor:
         """
@@ -255,7 +255,7 @@ class BalmTokenClassificationHead(nn.Module):
         Parameters
         ----------
         features : torch.Tensor
-            Features tensor of shape (batch_size, sequence_length, embed_dim).
+            Features tensor of shape (batch_size, sequence_length, hidden_size).
 
         Returns
         -------
