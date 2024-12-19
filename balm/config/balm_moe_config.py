@@ -157,7 +157,7 @@ class BalmMoEConfig(PretrainedConfig):
         num_hidden_layers: int = 6,
         num_attention_heads: int = 20,
         intermediate_size: Optional[int] = None,
-        activation: str = "swiglu",  # "swiglu", "relu", "gelu"
+        activation: str = "swiglu",
         dropout: float = 0.1,
         attention_dropout: Optional[float] = None,
         hidden_dropout: Optional[float] = None,
@@ -180,7 +180,7 @@ class BalmMoEConfig(PretrainedConfig):
         router_bias: bool = False,
         expert_capacity_type: str = "multiplier",  # "absolute" or "multiplier"
         expert_capacity: Union[int, float] = 2,
-        expert_activation: str = "gelu",  # "swiglu", "relu", "gelu"
+        expert_activation: str = "gelu",
         expert_bias: bool = True,
         expert_dropout: Optional[float] = None,
         alternate_sparsity: bool = True,
@@ -188,7 +188,7 @@ class BalmMoEConfig(PretrainedConfig):
         router_aux_loss_coef: float = 0.01,  # coefficient for aux loss (load balancing, top-k only)
         router_z_loss_coef: float = 0.001,  # coefficient for z-loss
         # classification
-        classifier_activation: str = "tanh",  # "swiglu", "relu", "gelu", or "tanh"
+        classifier_activation: str = "tanh",
         num_labels: int = 2,  # sequence/token-level classification
         num_choices: int = 4,  # multiple choice classification
         # outputs

@@ -671,10 +671,10 @@ class DenseTransformerLayer(nn.Module):
         #     nn.Dropout(config.hidden_dropout),
         #     nn.Linear(config.intermediate_size, config.hidden_size),
         # )
-        factor = 2 if config.expert_activation.lower() == "swiglu" else 1
+        factor = 2 if config.activation.lower() == "swiglu" else 1
         self.ffn_in = nn.Linear(config.hidden_size, config.intermediate_size * factor)
         self.ffn_out = nn.Linear(config.intermediate_size, config.hidden_size)
-        self.ffn_activation = get_activation_fn(config.expert_activation)
+        self.ffn_activation = get_activation_fn(config.activation)
 
         # dropout
         self.dropout = nn.Dropout(config.dropout)
