@@ -226,6 +226,7 @@ class BalmMoEConfig(PretrainedConfig):
         self.position_embedding_type = position_embedding_type.lower()
         self.pre_norm = bool(pre_norm)
         self.token_dropout = float(token_dropout)
+        self.type_vocab_size = int(type_vocab_size)
 
         # MoE params
         self.num_experts = int(num_experts)
