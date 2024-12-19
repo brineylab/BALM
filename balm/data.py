@@ -104,8 +104,10 @@ class DataCollatorForLanguageModeling(DataCollatorMixin):
 
         batch["input_ids"] = input_ids
         if "attention_mask" in batch:
-            batch["attention_mask"] = torch.tensor(
-                batch["attention_mask"], dtype=torch.bool
+            # invert attention mask to match behavior of the 🤗 DataCollatorForLanguageModeling
+            # 1 should now indicate non-padding tokens and 0 should indicate padding tokens
+            batch["attention_mask"] = 1 - torch.tensor(
+                batch["attention_mask"], dtype=torch.int
             )
         if "token_type_ids" in batch:
             batch["token_type_ids"] = torch.tensor(
