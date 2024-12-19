@@ -214,6 +214,7 @@ class BalmMoEConfig(PretrainedConfig):
         self.num_attention_heads = int(num_attention_heads)
         self.intermediate_size = int(intermediate_size or hidden_size * 4)
         self.activation = activation.lower()
+        self.dropout = float(dropout)
         self.attention_dropout = float(
             attention_dropout if attention_dropout is not None else dropout
         )
