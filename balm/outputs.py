@@ -143,6 +143,8 @@ class MoEModelOutput(BalmModelOutput):
     last_hidden_state: torch.FloatTensor = None
     hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
     attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
+    z_loss: torch.FloatTensor = None
+    aux_loss: torch.FloatTensor = None
     router_logits: Optional[Tuple[torch.FloatTensor]] = None
     expert_indexes: Optional[Tuple[torch.LongTensor]] = None
 

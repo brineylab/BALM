@@ -241,6 +241,16 @@ class BalmMoEModel(PreTrainedModel):
         if self.config.output_hidden_states:
             all_hidden_states += (x,)
 
+        # router losses
+        cat_router_logits = torch.cat(router_logits, dim=1)
+        cat_expert_indexes = torch.cat(expert_idxs, dim=1)
+        router_probs = nn.Softmax(dim=-1)(cat_router_logits)
+        z_loss = router_z_loss(cat_router_logits)
+        if self.config.router_type == "expert choice":
+            aux_loss = None
+        else:
+            aux_loss = router_load_balancing_loss(router_probs, cat_expert_indexes)
+
         # outputs
         if not self.config.return_dict:
             return tuple(
@@ -251,6 +261,8 @@ class BalmMoEModel(PreTrainedModel):
                     all_self_attentions,
                     router_logits if self.config.output_router_logits else None,
                     expert_idxs if self.config.output_expert_indexes else None,
+                    z_loss,
+                    aux_loss,
                 ]
                 if v is not None
             )
@@ -261,6 +273,8 @@ class BalmMoEModel(PreTrainedModel):
             attentions=all_self_attentions,
             router_logits=router_logits if self.config.output_router_logits else None,
             expert_indexes=expert_idxs if self.config.output_expert_indexes else None,
+            z_loss=z_loss,
+            aux_loss=aux_loss,
         )
 
     # def forward(
