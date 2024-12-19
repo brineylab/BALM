@@ -375,15 +375,12 @@ class BalmForMaskedLM(PreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin
         lm_logits = self.lm_head(x)
 
         # loss
-        lm_loss = None
+        loss = None
         if labels is not None:
-            # lm loss
             labels = labels.to(lm_logits.device)
-            lm_loss = self.criterion(
+            loss = self.criterion(
                 lm_logits.view(-1, self.config.vocab_size), labels.view(-1)
             )
-        else:
-            loss = None
 
         # outputs
         if not return_dict:
@@ -394,7 +391,6 @@ class BalmForMaskedLM(PreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin
                     lm_logits,
                     outputs.hidden_states,
                     outputs.attentions,
-                    lm_loss,
                 ]
                 if v is not None
             )
@@ -404,7 +400,6 @@ class BalmForMaskedLM(PreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin
             logits=lm_logits,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
-            lm_loss=lm_loss,
         )
 
 
