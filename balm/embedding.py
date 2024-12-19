@@ -40,7 +40,7 @@ class RotaryPositionalEmbedding(nn.Module):
         Parameters
         ----------
         x: torch.Tensor
-            The input tensor. Expected shape is (batch, seq_len, num_heads, head_dim).
+            The input tensor. Expected shape is (batch, seq_len, hidden_size).
 
         seq_len: Optional[int]
             The sequence length. If not provided, the sequence length is inferred from the input tensor.
@@ -48,10 +48,10 @@ class RotaryPositionalEmbedding(nn.Module):
         Returns
         -------
         torch.Tensor
-            The input tensor with rotary positional embeddings applied. The shape is (batch, seq_len, heads, head_dim).
+            The input tensor with rotary positional embeddings applied. The shape is (batch, seq_len, hidden_size).
 
         """
-        b, n, h, d = x.size()  # [batch, seq_len, num_heads, head_dim]
+        b, n, d = x.size()  # [batch, seq_len, hidden_size]
         if seq_len is None:
             seq_len = n
         half_d = d // 2
@@ -64,7 +64,7 @@ class RotaryPositionalEmbedding(nn.Module):
 
         x1, x2 = x[..., :half_d], x[..., half_d:]
         x_rotated = torch.cat([x1 * cos - x2 * sin, x2 * cos + x1 * sin], dim=-1)
-        return x_rotated  # [batch, seq_len, num_heads, head_dim]
+        return x_rotated  # [batch, seq_len, hidden_size]
 
 
 class RelativePositionalEmbedding(nn.Module):
