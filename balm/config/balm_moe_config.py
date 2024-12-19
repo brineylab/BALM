@@ -176,7 +176,7 @@ class BalmMoEConfig(PretrainedConfig):
         # MoE params
         num_experts: int = 8,
         num_shared_experts: int = 0,
-        top_k: int = 1,
+        num_experts_per_tok: int = 1,  # k for top-k routing (to comply with 🤗 naming)
         router_type: str = "topk",  # "topk" or "expert choice"
         router_dtype: str = "float32",
         router_jitter: float = 0.0,
@@ -244,7 +244,7 @@ class BalmMoEConfig(PretrainedConfig):
         # MoE params
         self.num_experts = int(num_experts)
         self.num_shared_experts = int(num_shared_experts)
-        self.top_k = int(top_k)
+        self.num_experts_per_tok = int(num_experts_per_tok)
         self.router_type = self._standardize_router_type(router_type)
         self.router_dtype = router_dtype.lower()
         self.router_jitter = float(router_jitter)

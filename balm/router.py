@@ -159,7 +159,9 @@ class TopKRouter(RouterBase):
         """
         num_routable_experts = self.config.num_experts - self.config.num_shared_experts
         router_probs, router_logits = self._compute_router_probabilities(x)
-        _, topk_indices = torch.topk(router_probs, k=self.config.top_k, dim=-1)
+        _, topk_indices = torch.topk(
+            router_probs, k=self.config.num_experts_per_tok, dim=-1
+        )
         expert_mask = F.one_hot(topk_indices, num_classes=num_routable_experts).sum(
             dim=-2
         )
