@@ -105,11 +105,11 @@ class DataCollatorForLanguageModeling(DataCollatorMixin):
         batch["input_ids"] = input_ids
         if "attention_mask" in batch:
             batch["attention_mask"] = torch.tensor(
-                batch["attention_mask"], dtype=torch.long
+                batch["attention_mask"], dtype=torch.bool
             )
         if "token_type_ids" in batch:
             batch["token_type_ids"] = torch.tensor(
-                batch["token_type_ids"], dtype=torch.long
+                batch["token_type_ids"], dtype=torch.int
             )
 
         batch["labels"] = labels
