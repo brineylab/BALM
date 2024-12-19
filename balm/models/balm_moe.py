@@ -8,7 +8,6 @@ import torch
 import torch.nn as nn
 from transformers import PretrainedConfig, PreTrainedModel
 
-from ..activation import get_activation_fn
 from ..config import BalmMoEConfig
 from ..loss import router_load_balancing_loss, router_z_loss
 from ..modules import (
@@ -18,7 +17,7 @@ from ..modules import (
     SparseTransformerLayer,
 )
 from ..outputs import MoEMaskedLMOutput, MoEModelOutput, MoESequenceClassifierOutput
-from .base import BalmBase, FreezeBaseModelMixin, ParameterCountMixin
+from .base import FreezeBaseModelMixin, ParameterCountMixin
 
 __all__ = [
     "BalmMoEModel",
