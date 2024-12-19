@@ -188,8 +188,8 @@ class BalmMoEConfig(PretrainedConfig):
         expert_dropout: Optional[float] = None,
         alternate_sparsity: bool = True,
         # router losses
-        aux_loss_coef: float = 0.01,  # coefficient for aux loss (load balancing, top-k only)
-        z_loss_coef: float = 0.001,  # coefficient for z-loss
+        router_aux_loss_coef: float = 0.01,  # coefficient for aux loss (load balancing, top-k only)
+        router_z_loss_coef: float = 0.001,  # coefficient for z-loss
         # classification
         classifier_activation: str = "tanh",  # "swiglu", "relu", "gelu", or "tanh"
         num_labels: int = 2,  # sequence/token-level classification
@@ -247,8 +247,8 @@ class BalmMoEConfig(PretrainedConfig):
         self.alternate_sparsity = bool(alternate_sparsity)
 
         # router losses
-        self.aux_loss_coef = float(aux_loss_coef)
-        self.z_loss_coef = float(z_loss_coef)
+        self.router_aux_loss_coef = float(router_aux_loss_coef)
+        self.router_z_loss_coef = float(router_z_loss_coef)
 
         # classification
         self.num_labels = int(num_labels)
