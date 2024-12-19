@@ -212,8 +212,8 @@ class BalmMoEModel(PreTrainedModel):
                 x = layer(
                     x,
                     attention_mask=attention_mask,
-                    need_weights=self.config.output_attentions,
-                    output_router_logits=self.config.output_router_logits,
+                    # need_weights=self.config.output_attentions,
+                    # output_router_logits=self.config.output_router_logits,
                 )
                 if self.config.output_attentions:
                     x, attn, router_tuple = x
@@ -227,7 +227,7 @@ class BalmMoEModel(PreTrainedModel):
                 x = layer(
                     x,
                     attention_mask=attention_mask,
-                    need_weights=self.config.output_attentions,
+                    # need_weights=self.config.output_attentions,
                 )
                 if self.config.output_attentions:
                     x, attn = x
