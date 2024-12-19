@@ -3,12 +3,9 @@
 # SPDX-License-Identifier: MIT
 
 
-from dataclasses import dataclass
 from typing import Optional, Union
 
 from transformers import PretrainedConfig
-
-# from .base import BaseConfig
 
 
 class BalmMoEConfig(PretrainedConfig):
@@ -271,17 +268,31 @@ class BalmMoEConfig(PretrainedConfig):
             raise ValueError(
                 f"Invalid expert capacity type: {self.expert_capacity_type}. Options are 'absolute' or 'multiplier'."
             )
-        if self.activation not in ["swiglu", "relu", "gelu"]:
+        if self.activation not in ["swiglu", "relu", "gelu", "glu", "reglu", "geglu"]:
             raise ValueError(
-                f"Invalid FFN activation: {self.activation}. Options are 'swiglu', 'relu', or 'gelu'."
+                f"Invalid FFN activation: {self.activation}. Options are 'swiglu', 'relu', 'gelu', 'glu', 'reglu', or 'geglu'."
             )
-        if self.expert_activation not in ["swiglu", "relu", "gelu"]:
+        if self.expert_activation not in [
+            "swiglu",
+            "relu",
+            "gelu",
+            "glu",
+            "reglu",
+            "geglu",
+        ]:
             raise ValueError(
-                f"Invalid expert activation: {self.expert_activation}. Options are 'swiglu', 'relu', or 'gelu'."
+                f"Invalid expert activation: {self.expert_activation}. Options are 'swiglu', 'relu', 'gelu', 'glu', 'reglu', or 'geglu'."
             )
-        if self.classifier_activation not in ["swiglu", "relu", "gelu", "tanh"]:
+        if self.classifier_activation not in [
+            "swiglu",
+            "relu",
+            "gelu",
+            "tanh",
+            "reglu",
+            "geglu",
+        ]:
             raise ValueError(
-                f"Invalid classifier activation: {self.classifier_activation}. Options are 'swiglu', 'relu', 'gelu', or 'tanh'."
+                f"Invalid classifier activation: {self.classifier_activation}. Options are 'swiglu', 'relu', 'gelu', 'tanh', 'reglu', or 'geglu'."
             )
 
     def _standardize_router_type(self, router_type: str) -> str:
