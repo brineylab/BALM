@@ -70,6 +70,9 @@ class BalmMoEConfig(PretrainedConfig):
     pad_token_id : int, default=1
         The pad token id.
 
+    type_vocab_size : int, default=2
+        Vocabulary size of the token_type_ids`
+
     num_experts : int, default=4
         The number of experts in the model.
 
@@ -169,6 +172,7 @@ class BalmMoEConfig(PretrainedConfig):
         token_dropout: float = 0.0,
         mask_token_id: int = 31,
         pad_token_id: int = 1,
+        type_vocab_size: int = 2,
         # MoE params
         num_experts: int = 8,
         num_shared_experts: int = 0,
