@@ -228,6 +228,18 @@ class BalmMoEConfig(PretrainedConfig):
         self.pre_norm = bool(pre_norm)
         self.token_dropout = float(token_dropout)
         self.type_vocab_size = int(type_vocab_size)
+        self.use_cache = bool(use_cache)
+
+        # classification
+        self.num_labels = int(num_labels)
+        self.num_choices = int(num_choices)
+        self.classifier_activation = classifier_activation.lower()
+
+        # outputs
+        self.output_attentions = bool(output_attentions)
+        self.output_hidden_states = bool(output_hidden_states)
+        self.output_router_logits = bool(output_router_logits)
+        self.output_expert_indexes = bool(output_expert_indexes)
 
         # MoE params
         self.num_experts = int(num_experts)
@@ -249,17 +261,6 @@ class BalmMoEConfig(PretrainedConfig):
         # router losses
         self.router_aux_loss_coef = float(router_aux_loss_coef)
         self.router_z_loss_coef = float(router_z_loss_coef)
-
-        # classification
-        self.num_labels = int(num_labels)
-        self.num_choices = int(num_choices)
-        self.classifier_activation = classifier_activation.lower()
-        # 🤗 integration
-        self.output_attentions = bool(output_attentions)
-        self.output_hidden_states = bool(output_hidden_states)
-        self.output_router_logits = bool(output_router_logits)
-        self.output_expert_indexes = bool(output_expert_indexes)
-        self.use_cache = bool(use_cache)
 
         # validate params
         if self.position_embedding_type not in ["rotary", "relative", "absolute"]:
