@@ -448,7 +448,7 @@ class SparseMLP(nn.Module):
         expert_outputs = []
 
         # experts
-        for idx, expert in enumerate(experts):
+        for idx, expert in enumerate(self.experts):
             token_indices = expert_mask[..., idx].bool()
             expert_output = expert(x[token_indices]).to(x.dtype)
             expanded_output = torch.zeros_like(x)
