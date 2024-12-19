@@ -42,6 +42,69 @@ class FreezeBaseModelMixin:
             self.router_aux_loss_coef = 0.0
 
 
+class ParameterCountMixin:
+    def num_parameters(
+        self,
+        only_trainable: bool = True,
+        exclude_embeddings: bool = False,
+        human_readable: bool = False,
+    ) -> int:
+        """
+        Get number of (optionally, trainable or non-embeddings) parameters in the module.
+
+        Parameters
+        ----------
+        only_trainable : bool, optional, defaults to `False`
+            Whether or not to return only the number of trainable parameters
+
+        exclude_embeddings : bool, optional, defaults to `False`
+            Whether or not to return only the number of non-embeddings parameters
+
+        human_readable : bool, optional, defaults to `False`
+            Whether or not to return the number of parameters in a human-readable format
+
+        Returns
+        -------
+        int or str
+            The number of parameters. If `human_readable` is `True`, the number of parameters
+            will be returned as a string in a human-readable format.
+        """
+
+        if exclude_embeddings:
+            embedding_param_names = [
+                f"{name}.weight"
+                for name, module_type in self.named_modules()
+                if isinstance(module_type, nn.Embedding)
+            ]
+            total_parameters = [
+                parameter
+                for name, parameter in self.named_parameters()
+                if name not in embedding_param_names
+            ]
+        else:
+            total_parameters = list(self.parameters())
+
+        total_numel = []
+        for param in total_parameters:
+            if param.requires_grad or not only_trainable:
+                total_numel.append(param.numel())
+        total_num_params = sum(total_numel)
+
+        if human_readable:
+            if total_num_params < 1e3:
+                return total_num_params
+            elif total_num_params < 1e6:
+                return f"{total_num_params / 1e3:.2f}K"
+            elif total_num_params < 1e9:
+                return f"{total_num_params / 1e6:.2f}M"
+            elif total_num_params < 1e12:
+                return f"{total_num_params / 1e9:.2f}B"
+            else:
+                return f"{total_num_params / 1e12:.2f}T"
+        else:
+            return total_num_params
+
+
 class BalmBase(nn.Module):
     """
     Base class for Balm models.

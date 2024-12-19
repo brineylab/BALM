@@ -18,7 +18,7 @@ from ..modules import (
     SparseTransformerLayer,
 )
 from ..outputs import MoEMaskedLMOutput, MoEModelOutput, MoESequenceClassifierOutput
-from .base import BalmBase, FreezeBaseModelMixin
+from .base import BalmBase, FreezeBaseModelMixin, ParameterCountMixin
 
 __all__ = [
     "BalmMoEModel",
@@ -27,7 +27,7 @@ __all__ = [
 ]
 
 
-class BalmMoEModel(PreTrainedModel):
+class BalmMoEModel(PreTrainedModel, ParameterCountMixin):
     config_class = BalmMoEConfig
     base_model_prefix = None
 
@@ -646,7 +646,7 @@ class BalmMoEModel(PreTrainedModel):
     #     # return result.as_tuple()
 
 
-class BalmMoEForMaskedLM(PreTrainedModel, FreezeBaseModelMixin):
+class BalmMoEForMaskedLM(PreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin):
     """
     BALM Mixture-of-Experts (MoE) model for masked language modeling.
     Uses the BALM-MoE encoder and adds a masked language modeling head.
@@ -809,7 +809,9 @@ class BalmMoEForMaskedLM(PreTrainedModel, FreezeBaseModelMixin):
         # return outputs.as_tuple()
 
 
-class BalmMoEForSequenceClassification(PreTrainedModel, FreezeBaseModelMixin):
+class BalmMoEForSequenceClassification(
+    PreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin
+):
     """
     BALM Mixture-of-Experts (MoE) model for sequence classification.
     Uses the BALM-MoE encoder and adds a sequence-level classification head.
