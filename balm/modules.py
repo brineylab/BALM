@@ -732,12 +732,12 @@ class DenseTransformerLayer(nn.Module):
         x = residual + self.dropout(x)
 
         # post-norm
-        if not self.pre_norm:
+        if not self.config.pre_norm:
             x = self.norm1(x)
 
         # pre-norm
         residual = x
-        if self.pre_norm:
+        if self.config.pre_norm:
             x = self.norm2(x)
 
         # feedforward
@@ -745,7 +745,7 @@ class DenseTransformerLayer(nn.Module):
         x = residual + self.dropout(x)
 
         # post-norm
-        if not self.pre_norm:
+        if not self.config.pre_norm:
             x = self.norm2(x)
 
         # outputs
@@ -981,7 +981,7 @@ class SparseTransformerLayer(nn.Module):
 
         # pre-norm
         residual = x
-        if self.pre_norm:
+        if self.config.pre_norm:
             x = self.norm2(x)
 
         # feedforward
@@ -989,7 +989,7 @@ class SparseTransformerLayer(nn.Module):
         x = residual + self.dropout(x)
 
         # post-norm
-        if not self.pre_norm:
+        if not self.config.pre_norm:
             x = self.norm2(residual + x)
 
         # outputs
