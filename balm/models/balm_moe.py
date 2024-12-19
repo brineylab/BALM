@@ -747,12 +747,12 @@ class BalmMoEForMaskedLM(PreTrainedModel, FreezeBaseModelMixin):
             )
 
             # router loss(es)
-            z_loss = self.z_loss_coef * (outputs.z_loss)
-            if self.config.expert_choice_router:
+            z_loss = self.router_z_loss_coef * (outputs.z_loss)
+            if self.config.router_type == "expert choice":
                 loss = lm_loss + z_loss
                 aux_loss = None
             else:
-                aux_loss = self.aux_loss_coef * (outputs.aux_loss)
+                aux_loss = self.router_aux_loss_coef * (outputs.aux_loss)
                 loss = lm_loss + z_loss + aux_loss
         else:
             loss = None
@@ -835,8 +835,8 @@ class BalmMoEForSequenceClassification(PreTrainedModel, FreezeBaseModelMixin):
         self.criterion = nn.CrossEntropyLoss()
 
         # router loss coefficients
-        self.z_loss_coef = self.config.router_z_loss_coef
-        self.aux_loss_coef = self.config.router_aux_loss_coef
+        self.router_z_loss_coef = self.config.router_z_loss_coef
+        self.router_aux_loss_coef = self.config.router_aux_loss_coef
 
     def forward(
         self,
@@ -909,12 +909,12 @@ class BalmMoEForSequenceClassification(PreTrainedModel, FreezeBaseModelMixin):
             )
 
             # router loss(es)
-            z_loss = self.z_loss_coef * (outputs.z_loss)
-            if self.config.expert_choice_router:
+            z_loss = self.router_z_loss_coef * (outputs.z_loss)
+            if self.config.router_type == "expert choice":
                 loss = classifier_loss + z_loss
                 aux_loss = None
             else:
-                aux_loss = self.aux_loss_coef * (outputs.aux_loss)
+                aux_loss = self.router_aux_loss_coef * (outputs.aux_loss)
                 loss = classifier_loss + z_loss + aux_loss
         else:
             loss = None
