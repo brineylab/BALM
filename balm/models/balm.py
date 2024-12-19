@@ -296,7 +296,7 @@ class BalmModel(PreTrainedModel, ParameterCountMixin):
 #         )
 
 
-class BalmMoEForMaskedLM(PreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin):
+class BalmForMaskedLM(PreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin):
     """
     BALM model for masked language modeling.
     Uses the BALM encoder and adds a masked language modeling head.
