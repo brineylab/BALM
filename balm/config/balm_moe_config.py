@@ -257,6 +257,8 @@ class BalmMoEConfig(PretrainedConfig):
         # 🤗 integration
         self.output_attentions = bool(output_attentions)
         self.output_hidden_states = bool(output_hidden_states)
+        self.output_router_logits = bool(output_router_logits)
+        self.output_expert_indexes = bool(output_expert_indexes)
         self.use_cache = bool(use_cache)
 
         # validate params
