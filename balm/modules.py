@@ -664,14 +664,18 @@ class DenseTransformerLayer(nn.Module):
         )
 
         # feedforward
-        factor = 2 if config.expert_activation == "swiglu" else 1
-        self.activation = get_activation_fn(config.activation)
-        self.feed_forward = nn.Sequential(
-            nn.Linear(config.hidden_size, config.intermediate_size * factor),
-            self.activation,
-            nn.Dropout(config.hidden_dropout),
-            nn.Linear(config.intermediate_size, config.hidden_size),
-        )
+        # factor = 2 if config.expert_activation == "swiglu" else 1
+        # self.activation = get_activation_fn(config.activation)
+        # self.feed_forward = nn.Sequential(
+        #     nn.Linear(config.hidden_size, config.intermediate_size * factor),
+        #     self.activation,
+        #     nn.Dropout(config.hidden_dropout),
+        #     nn.Linear(config.intermediate_size, config.hidden_size),
+        # )
+        factor = 2 if config.expert_activation.lower() == "swiglu" else 1
+        self.ffn_in = nn.Linear(config.hidden_size, config.intermediate_size * factor)
+        self.ffn_out = nn.Linear(config.intermediate_size, config.hidden_size)
+        self.ffn_activation = get_activation_fn(config.expert_activation)
 
         # dropout
         self.dropout = nn.Dropout(config.dropout)
@@ -687,7 +691,7 @@ class DenseTransformerLayer(nn.Module):
         Parameters:
         -----------
         x : torch.Tensor
-            Input tensor of shape (batch_size, sequence_length, embed_dim).
+            Input tensor of shape (batch_size, sequence_length, hidden_size).
 
         attention_mask : torch.Tensor, optional
             Attention mask of shape (batch_size, sequence_length). The default is None.
@@ -699,7 +703,7 @@ class DenseTransformerLayer(nn.Module):
             (x, attn). Otherwise, the output will be just x.
 
             x : torch.Tensor
-                Output tensor of shape (batch_size, sequence_length, embed_dim).
+                Output tensor of shape (batch_size, sequence_length, hidden_size).
             attn : torch.Tensor
                 Attention weights of shape (batch_size, num_heads, sequence_length, sequence_length).
 
@@ -741,8 +745,12 @@ class DenseTransformerLayer(nn.Module):
             x = self.norm2(x)
 
         # feedforward
-        x = self.feed_forward(x)
-        x = residual + self.dropout(x)
+        # x = self.feed_forward(x)
+        x = self.ffn_in(x)
+        x = self.ffn_activation(x)
+        x = self.dropout(x)
+        x = self.ffn_out(x)
+        x = residual + x
 
         # post-norm
         if not self.config.pre_norm:
@@ -932,7 +940,7 @@ class SparseTransformerLayer(nn.Module):
         Parameters:
         -----------
         x : torch.Tensor
-            Input tensor of shape (batch_size, sequence_length, embed_dim).
+            Input tensor of shape (batch_size, sequence_length, hidden_size).
 
         attention_mask : torch.Tensor, optional
             Attention mask of shape (batch_size, sequence_length). The default is None.
@@ -945,7 +953,7 @@ class SparseTransformerLayer(nn.Module):
             Otherwise, output is a tuple of (x, router_tuple).
 
             x: torch.Tensor
-                Output tensor of shape (batch_size, sequence_length, embed_dim).
+                Output tensor of shape (batch_size, sequence_length, hidden_size).
             attn: torch.Tensor
                 Attention weights of shape (batch_size, num_heads, sequence_length, sequence_length).
             router_tuple: Tuple
@@ -958,17 +966,35 @@ class SparseTransformerLayer(nn.Module):
         if self.config.pre_norm:
             x = self.norm1(x)
 
+        # # positional embeddings
+        # x = self.embedding_dropout(self.positional_embeddings(x))
+
+        # # attention
+        # x = self.self_attn(
+        #     x,
+        #     x,
+        #     x,
+        #     key_padding_mask=attention_mask,
+        #     need_weights=self.config.output_attentions,
+        # )
+
         # positional embeddings
-        x = self.embedding_dropout(self.positional_embeddings(x))
+        if self.config.position_embedding_type == "rotary":
+            k = self.rotary_embeddings(x)
+            q = self.rotary_embeddings(x)
+            v = x
+        else:
+            k, q, v = x, x, x
 
         # attention
-        x = self.self_attn(
-            x,
-            x,
-            x,
+        x = self.attention(
+            k,
+            q,
+            v,
             key_padding_mask=attention_mask,
             need_weights=self.config.output_attentions,
         )
+
         if self.config.output_attentions:
             x, attn = x
         else:
