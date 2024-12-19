@@ -707,6 +707,14 @@ class DenseTransformerLayer(nn.Module):
                 Attention weights of shape (batch_size, num_heads, sequence_length, sequence_length).
 
         """
+
+        # invert attention mask and convert to boolean, since the 🤗 DataCollatorForLanguageModeling
+        # uses 0 for padding tokens and 1 for other tokens, but we want True for padding tokens and
+        # False for other tokens
+        if attention_mask is not None:
+            attention_mask = 1 - attention_mask
+            attention_mask = attention_mask.bool()
+
         # pre-norm
         residual = x
         if self.config.pre_norm:
@@ -960,6 +968,13 @@ class SparseTransformerLayer(nn.Module):
                 (batch_size, sequence_length, num_experts).
 
         """
+        # invert attention mask and convert to boolean, since the 🤗 DataCollatorForLanguageModeling
+        # uses 0 for padding tokens and 1 for other tokens, but we want True for padding tokens and
+        # False for other tokens
+        if attention_mask is not None:
+            attention_mask = 1 - attention_mask
+            attention_mask = attention_mask.bool()
+
         # pre-norm
         residual = x
         if self.config.pre_norm:
