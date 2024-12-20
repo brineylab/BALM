@@ -222,7 +222,7 @@ class BalmMoEModel(PreTrainedModel, ParameterCountMixin):
 
         # layers
         for layer in self.layers:
-            if self.config.output_hidden_states:
+            if output_hidden_states:
                 all_hidden_states += (x,)
 
             if isinstance(layer, SparseTransformerLayer):
@@ -756,11 +756,10 @@ class BalmMoEForMaskedLM(PreTrainedModel, FreezeBaseModelMixin, ParameterCountMi
         outputs = self.balm(
             input_ids,
             attention_mask=attention_mask,
-            # key_padding_mask=key_padding_mask,
-            # output_attentions=self.config.output_attentions,
-            # output_hidden_states=self.config.output_hidden_states,
-            # output_router_logits=self.config.output_router_logits,
-            # output_expert_indexes=self.config.output_expert_indexes,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            output_router_logits=output_router_logits,
+            output_expert_indexes=output_expert_indexes,
             return_dict=True,
         )
         x = outputs.last_hidden_state
@@ -877,11 +876,11 @@ class BalmMoEForSequenceClassification(
         attention_mask: Optional[torch.Tensor] = None,
         key_padding_mask: Optional[torch.Tensor] = None,
         labels: Optional[torch.Tensor] = None,
-        # output_attentions: bool = False,
-        # output_hidden_states: bool = False,
-        # output_router_logits: bool = False,
-        # output_expert_indexes: bool = False,
-        return_dict: bool = True,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        output_router_logits: Optional[bool] = None,
+        output_expert_indexes: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
     ) -> Union[MoESequenceClassifierOutput, tuple]:
         """
         Forward pass
@@ -921,10 +920,10 @@ class BalmMoEForSequenceClassification(
             input_ids,
             attention_mask=attention_mask,
             key_padding_mask=key_padding_mask,
-            # output_attentions=output_attentions,
-            # output_hidden_states=output_hidden_states,
-            # output_router_logits=output_router_logits,
-            # output_expert_indexes=output_expert_indexes,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            output_router_logits=output_router_logits,
+            output_expert_indexes=output_expert_indexes,
             return_dict=True,
         )
         x = outputs.last_hidden_state
