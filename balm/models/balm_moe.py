@@ -105,15 +105,11 @@ class BalmMoEModel(PreTrainedModel, ParameterCountMixin):
         token_type_ids: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
-        # output_attentions: bool = False,
-        # output_hidden_states: bool = False,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        output_router_logits: Optional[bool] = None,
+        output_expert_indexes: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        # key_padding_mask: Optional[torch.Tensor] = None,
-        # output_attentions: bool = False,
-        # output_hidden_states: bool = False,
-        # output_router_logits: bool = False,
-        # output_expert_indexes: bool = False,
-        # return_dict: bool = True,
     ) -> Union[MoEMaskedLMOutput, tuple]:
         """
         Parameters:
@@ -170,14 +166,37 @@ class BalmMoEModel(PreTrainedModel, ParameterCountMixin):
             value will be ``None`` (for ``MoEModelOutput``) or not returned at all (for ``tuple``).
 
         """
-        # init
-        all_self_attentions = () if self.config.output_attentions else None
-        all_hidden_states = () if self.config.output_hidden_states else None
-        router_logits = ()
-        expert_idxs = ()
+        # parse output options
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
+        output_hidden_states = (
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
+        )
+        output_router_logits = (
+            output_router_logits
+            if output_router_logits is not None
+            else self.config.output_router_logits
+        )
+        output_expert_indexes = (
+            output_expert_indexes
+            if output_expert_indexes is not None
+            else self.config.output_expert_indexes
+        )
         return_dict = (
             return_dict if return_dict is not None else self.config.return_dict
         )
+
+        # init
+        all_self_attentions = () if output_attentions else None
+        all_hidden_states = () if output_hidden_states else None
+        router_logits = ()
+        expert_idxs = ()
+
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot provide both input_ids and inputs_embeds")
         device = input_ids.device if input_ids is not None else inputs_embeds.device
@@ -211,10 +230,9 @@ class BalmMoEModel(PreTrainedModel, ParameterCountMixin):
                 x = layer(
                     x,
                     attention_mask=attention_mask,
-                    # need_weights=self.config.output_attentions,
-                    # output_router_logits=self.config.output_router_logits,
+                    need_weights=output_attentions,
                 )
-                if self.config.output_attentions:
+                if output_attentions:
                     x, attn, router_tuple = x
                     all_self_attentions += (attn,)
                 else:
@@ -226,9 +244,9 @@ class BalmMoEModel(PreTrainedModel, ParameterCountMixin):
                 x = layer(
                     x,
                     attention_mask=attention_mask,
-                    # need_weights=self.config.output_attentions,
+                    need_weights=output_attentions,
                 )
-                if self.config.output_attentions:
+                if output_attentions:
                     x, attn = x
                     all_self_attentions += (attn,)
 
@@ -237,7 +255,7 @@ class BalmMoEModel(PreTrainedModel, ParameterCountMixin):
             x = self.final_norm(x)
 
         # save the last hidden state
-        if self.config.output_hidden_states:
+        if output_hidden_states:
             all_hidden_states += (x,)
 
         # router losses
@@ -251,15 +269,15 @@ class BalmMoEModel(PreTrainedModel, ParameterCountMixin):
             aux_loss = router_load_balancing_loss(router_probs, cat_expert_indexes)
 
         # outputs
-        if not self.config.return_dict:
+        if not return_dict:
             return tuple(
                 v
                 for v in [
                     x,
                     all_hidden_states,
                     all_self_attentions,
-                    router_logits if self.config.output_router_logits else None,
-                    expert_idxs if self.config.output_expert_indexes else None,
+                    router_logits if output_router_logits else None,
+                    expert_idxs if output_expert_indexes else None,
                     z_loss,
                     aux_loss,
                 ]
@@ -270,8 +288,8 @@ class BalmMoEModel(PreTrainedModel, ParameterCountMixin):
             last_hidden_state=x,
             hidden_states=all_hidden_states,
             attentions=all_self_attentions,
-            router_logits=router_logits if self.config.output_router_logits else None,
-            expert_indexes=expert_idxs if self.config.output_expert_indexes else None,
+            router_logits=router_logits if output_router_logits else None,
+            expert_indexes=expert_idxs if output_expert_indexes else None,
             z_loss=z_loss,
             aux_loss=aux_loss,
         )
@@ -690,10 +708,10 @@ class BalmMoEForMaskedLM(PreTrainedModel, FreezeBaseModelMixin, ParameterCountMi
         attention_mask: Optional[torch.Tensor] = None,
         key_padding_mask: Optional[torch.Tensor] = None,
         labels: Optional[torch.Tensor] = None,
-        # output_attentions: bool = False,
-        # output_hidden_states: bool = False,
-        # output_router_logits: bool = False,
-        # output_expert_indexes: bool = False,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        output_router_logits: Optional[bool] = None,
+        output_expert_indexes: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[MoEMaskedLMOutput, tuple]:
         """

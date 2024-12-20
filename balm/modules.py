@@ -683,6 +683,7 @@ class DenseTransformerLayer(nn.Module):
         self,
         x: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
+        need_weights: bool = False,
     ):
         """
         Process the input hidden states.
@@ -694,6 +695,9 @@ class DenseTransformerLayer(nn.Module):
 
         attention_mask : torch.Tensor, optional
             Attention mask of shape (batch_size, sequence_length). The default is None.
+
+        need_weights : bool, optional
+            Whether to return the attention weights. The default is False.
 
         Returns:
         --------
@@ -734,9 +738,9 @@ class DenseTransformerLayer(nn.Module):
             q,
             v,
             key_padding_mask=attention_mask,
-            need_weights=self.config.output_attentions,
+            need_weights=need_weights,
         )
-        if self.config.output_attentions:
+        if need_weights:
             x, attn = x
         else:
             x = x[0]
@@ -764,7 +768,7 @@ class DenseTransformerLayer(nn.Module):
             x = self.norm2(x)
 
         # outputs
-        if self.config.output_attentions:
+        if need_weights:
             return x, attn
         return x
 
@@ -940,6 +944,7 @@ class SparseTransformerLayer(nn.Module):
         self,
         x: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
+        need_weights: bool = False,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, Tuple]]:
         """
         Process the input hidden states.
@@ -951,6 +956,9 @@ class SparseTransformerLayer(nn.Module):
 
         attention_mask : torch.Tensor, optional
             Attention mask of shape (batch_size, sequence_length). The default is None.
+
+        need_weights : bool, optional
+            Whether to return the attention weights. The default is False.
 
         Returns:
         --------
@@ -1006,10 +1014,10 @@ class SparseTransformerLayer(nn.Module):
             q,
             v,
             key_padding_mask=attention_mask,
-            need_weights=self.config.output_attentions,
+            need_weights=need_weights,
         )
 
-        if self.config.output_attentions:
+        if need_weights:
             x, attn = x
         else:
             x = x[0]
@@ -1033,7 +1041,7 @@ class SparseTransformerLayer(nn.Module):
             x = self.norm2(residual + x)
 
         # outputs
-        if self.config.output_attentions:
+        if need_weights:
             return (x, attn, router_tuple)
         return (x, router_tuple)
 

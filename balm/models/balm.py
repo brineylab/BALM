@@ -360,7 +360,7 @@ class BalmForMaskedLM(PreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin
         Returns
         -------
         output (tuple or dict):
-            If `return_dict` is ``True``, the output is a ``MoEMaskedLMOutput`` object
+            If `return_dict` is ``True``, the output is a ``MaskedLMOutput`` object
 
         """
         # encoder
