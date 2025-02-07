@@ -61,11 +61,60 @@ def get_activation_fn(activation: Union[str, nn.Module]) -> nn.Module:
 class SwiGLU(nn.Module):
     """
     SwiGLU activation function.
+
+    .. note::
+        Depending on whether the dimension is provided, the implementation will be different.
+
+        If the dimension is provided, the input tensor will separately processed by two linear layers,
+        and resulting two tensors will be used to compute the SwiGLU activation, like so:
+
+        ```python
+        gate = self.gate_linear(x)
+        value = self.value_linear(x)
+        return value * F.silu(gate)
+        ```
+
+        If the dimension is not provided, the input tensor will be chunked into two tensors,
+        and the resulting two tensors will be used to compute the SwiGLU activation. This results
+        in the output dimension being half of the input dimension, like so:
+
+        ```python
+        value, gate = x.chunk(2, dim=-1)
+        return value + F.silu(gate)
+        ```
+
+    Parameters
+    ----------
+    dim: int | None
+        The dimension of the input tensor. If provided, the input tensor will be separately processed by two linear layers.
+        If not provided, the input tensor will be chunked into two tensors, and the resulting two tensors will be used to compute the SwiGLU activation.
+
+    Returns
+    -------
+    torch.Tensor
+        The SwiGLU activation of the input tensor.
+
     """
 
+    def __init__(self, dim: int | None = None):
+        super().__init__()
+        if dim is not None:
+            self.gate_linear = nn.Linear(dim, dim)
+            self.value_linear = nn.Linear(dim, dim)
+            self.chunked_version = False
+        else:
+            self.gate_linear = None
+            self.value_linear = None
+            self.chunked_version = True
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x1, x2 = x.chunk(2, dim=-1)
-        return x1 + F.silu(x2)
+        if self.chunked_version:
+            value, gate = x.chunk(2, dim=-1)
+            return value + F.silu(gate)
+        else:
+            gate = self.gate_linear(x)
+            value = self.value_linear(x)
+            return value * F.silu(gate)
 
 
 class GeGLU(nn.Module):
