@@ -70,15 +70,15 @@ class BalmMoEConfig(PretrainedConfig):
     type_vocab_size : int, default=2
         Vocabulary size of the token_type_ids`
 
-    num_experts : int, default=4
+    num_experts : int, default=8
         The number of experts in the model.
 
-    top_k : int, default=1
-        The top k to use for the router.
+    num_experts_per_tok : int, default=1
+        The number of experts to route each token to. Only used if `router_type` is ``"topk"``.
 
-    router_type : str, default="top-k"
+    router_type : str, default="topk"
         The type of router to use.
-        Options are "top-k" or "expert-choice".
+        Options are "topk" or "expert choice".
 
     expert_capacity_type : str, default="multiplier"
         The type of expert capacity to use.
@@ -129,7 +129,7 @@ class BalmMoEConfig(PretrainedConfig):
         Whether to use the cache.
 
     **kwargs : dict, optional
-        Additional keyword arguments are passed to the parent class (transformers.PretrainedConfig).
+        Additional keyword arguments are passed directly to the parent class (``transformers.PretrainedConfig``).
 
     Raises
     ------
