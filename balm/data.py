@@ -4,12 +4,16 @@
 
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Union
 
 import polars as pl
 import torch
 from datasets import Dataset, DatasetDict
-from transformers.data.data_collator import DataCollatorMixin
+from transformers.data.data_collator import (
+    DataCollatorMixin,
+    _torch_collate_batch,
+    pad_without_fast_tokenizer_warning,
+)
 from transformers.tokenization_utils_base import BatchEncoding
 
 __all__ = [
@@ -39,86 +43,177 @@ class DataCollatorForLanguageModeling(DataCollatorMixin):
     return_tensors: str = "pt"
 
     def torch_call(
-        self, examples: List[Union[List[int], Dict[str, Any], BatchEncoding]]
+        self, examples: List[Union[List[int], Any, Dict[str, Any]]]
     ) -> Dict[str, Any]:
-        # convert to dict of lists
-        if isinstance(examples[0], (dict, BatchEncoding)):
-            batch = {}
-            for k in examples[0].keys():
-                batch[k] = [e[k] for e in examples]
+        # Handle dict or lists with proper padding and conversion to tensor.
+        if isinstance(examples[0], Mapping):
+            batch = pad_without_fast_tokenizer_warning(
+                self.tokenizer,
+                examples,
+                return_tensors="pt",
+                pad_to_multiple_of=self.pad_to_multiple_of,
+            )
         else:
-            batch = {"input_ids": examples}
-
-        input_ids = torch.tensor(batch["input_ids"], dtype=torch.long)
-        labels = input_ids.clone()
+            batch = {
+                "input_ids": _torch_collate_batch(
+                    examples, self.tokenizer, pad_to_multiple_of=self.pad_to_multiple_of
+                )
+            }
 
         # check if per-position mask_probabilities are provided
-        mask_probabilities = batch.get("mask_probabilities", None)
+        mask_probabilities = examples.get("mask_probabilities", None)
         if mask_probabilities is not None:
             mask_probabilities = torch.tensor(mask_probabilities, dtype=torch.float)
             assert (
-                mask_probabilities.shape == input_ids.shape
+                mask_probabilities.shape == batch["input_ids"].shape
             ), "mask_probabilities must match input_ids shape."
-        # if not, use uniform mlm_probability
-        else:
-            mask_probabilities = torch.full(
-                input_ids.shape, self.mlm_probability, dtype=torch.float
-            )
 
-        # special tokens mask
-        special_tokens_mask = None
-        if "special_tokens_mask" in batch:
-            special_tokens_mask = torch.tensor(
-                batch["special_tokens_mask"], dtype=torch.bool
+        # If special token mask has been preprocessed, pop it from the dict.
+        special_tokens_mask = batch.pop("special_tokens_mask", None)
+        if self.mlm:
+            batch["input_ids"], batch["labels"] = self.torch_mask_tokens(
+                batch["input_ids"], special_tokens_mask=special_tokens_mask
             )
         else:
-            special_tokens_mask = torch.zeros_like(input_ids, dtype=torch.bool)
+            labels = batch["input_ids"].clone()
+            if self.tokenizer.pad_token_id is not None:
+                labels[labels == self.tokenizer.pad_token_id] = -100
+            batch["labels"] = labels
+        return batch
 
-        # add padding tokens to special tokens mask
-        if self.tokenizer.pad_token_id is not None:
-            padding_mask = input_ids == self.tokenizer.pad_token_id
-            special_tokens_mask = special_tokens_mask | padding_mask
+    def torch_mask_tokens(
+        self,
+        inputs: Any,
+        special_tokens_mask: Optional[Any] = None,
+        probability_matrix: Optional[Any] = None,
+    ) -> Tuple[Any, Any]:
+        """
+        Prepare masked tokens inputs/labels for masked language modeling: 80% MASK, 10% random, 10% original.
+        """
+        import torch
 
-        # select tokens to mask
-        rand = torch.rand(input_ids.shape)
-        final_mask = (rand < mask_probabilities) & ~special_tokens_mask
-        probability_matrix = final_mask.float()
+        labels = inputs.clone()
+        # We sample a few tokens in each sequence for MLM training (with probability `self.mlm_probability`)
+        if probability_matrix is None:
+            probability_matrix = torch.full(labels.shape, self.mlm_probability)
+        if special_tokens_mask is None:
+            special_tokens_mask = [
+                self.tokenizer.get_special_tokens_mask(
+                    val, already_has_special_tokens=True
+                )
+                for val in labels.tolist()
+            ]
+            special_tokens_mask = torch.tensor(special_tokens_mask, dtype=torch.bool)
+        else:
+            special_tokens_mask = special_tokens_mask.bool()
 
-        # replace with mask token 80% of the time
-        masked_indices = final_mask
-        indices_replaced = torch.rand_like(labels.float()) < 0.8 * probability_matrix
-        indices_replaced = indices_replaced & masked_indices
-        input_ids[indices_replaced] = self.tokenizer.mask_token_id
+        probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
+        masked_indices = torch.bernoulli(probability_matrix).bool()
+        labels[~masked_indices] = -100  # We only compute loss on masked tokens
 
-        # replace with a random non-special token 10% of the time
-        # the final 10% are left unchanged
-        indices_random = torch.rand_like(labels.float()) < 0.1 * probability_matrix
-        indices_random = indices_random & masked_indices & ~indices_replaced
+        # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
+        indices_replaced = (
+            torch.bernoulli(torch.full(labels.shape, 0.8)).bool() & masked_indices
+        )
+        inputs[indices_replaced] = self.tokenizer.convert_tokens_to_ids(
+            self.tokenizer.mask_token
+        )
+
+        # 10% of the time, we replace masked input tokens with random word
+        indices_random = (
+            torch.bernoulli(torch.full(labels.shape, 0.5)).bool()
+            & masked_indices
+            & ~indices_replaced
+        )
         random_words = torch.randint(
             len(self.tokenizer), labels.shape, dtype=torch.long
         )
-        input_ids[indices_random] = random_words[indices_random]
+        inputs[indices_random] = random_words[indices_random]
 
-        # ignore labels for non-masked tokens by setting to -100
-        labels[~masked_indices] = -100
+        # The rest of the time (10% of the time) we keep the masked input tokens unchanged
+        return inputs, labels
 
-        batch["input_ids"] = input_ids
-        if "attention_mask" in batch:
-            # invert attention mask to match behavior of the 🤗 DataCollatorForLanguageModeling
-            # 1 should now indicate non-padding tokens and 0 should indicate padding tokens
-            batch["attention_mask"] = 1 - torch.tensor(
-                batch["attention_mask"], dtype=torch.int
-            )
-        if "token_type_ids" in batch:
-            batch["token_type_ids"] = torch.tensor(
-                batch["token_type_ids"], dtype=torch.int
-            )
+    # def torch_call(
+    #     self, examples: List[Union[List[int], Dict[str, Any], BatchEncoding]]
+    # ) -> Dict[str, Any]:
+    #     # convert to dict of lists
+    #     if isinstance(examples[0], (dict, BatchEncoding)):
+    #         batch = {}
+    #         for k in examples[0].keys():
+    #             batch[k] = [e[k] for e in examples]
+    #     else:
+    #         batch = {"input_ids": examples}
 
-        batch["labels"] = labels
-        if "mask_probabilities" in batch:
-            del batch["mask_probabilities"]
+    #     input_ids = torch.tensor(batch["input_ids"], dtype=torch.long)
+    #     labels = input_ids.clone()
 
-        return batch
+    #     # check if per-position mask_probabilities are provided
+    #     mask_probabilities = batch.get("mask_probabilities", None)
+    #     if mask_probabilities is not None:
+    #         mask_probabilities = torch.tensor(mask_probabilities, dtype=torch.float)
+    #         assert (
+    #             mask_probabilities.shape == input_ids.shape
+    #         ), "mask_probabilities must match input_ids shape."
+    #     # if not, use uniform mlm_probability
+    #     else:
+    #         mask_probabilities = torch.full(
+    #             input_ids.shape, self.mlm_probability, dtype=torch.float
+    #         )
+
+    #     # special tokens mask
+    #     special_tokens_mask = None
+    #     if "special_tokens_mask" in batch:
+    #         special_tokens_mask = torch.tensor(
+    #             batch["special_tokens_mask"], dtype=torch.bool
+    #         )
+    #     else:
+    #         special_tokens_mask = torch.zeros_like(input_ids, dtype=torch.bool)
+
+    #     # add padding tokens to special tokens mask
+    #     if self.tokenizer.pad_token_id is not None:
+    #         padding_mask = input_ids == self.tokenizer.pad_token_id
+    #         special_tokens_mask = special_tokens_mask | padding_mask
+
+    #     # select tokens to mask
+    #     rand = torch.rand(input_ids.shape)
+    #     final_mask = (rand < mask_probabilities) & ~special_tokens_mask
+    #     probability_matrix = final_mask.float()
+
+    #     # replace with mask token 80% of the time
+    #     masked_indices = final_mask
+    #     indices_replaced = torch.rand_like(labels.float()) < 0.8 * probability_matrix
+    #     indices_replaced = indices_replaced & masked_indices
+    #     input_ids[indices_replaced] = self.tokenizer.mask_token_id
+
+    #     # replace with a random non-special token 10% of the time
+    #     # the final 10% are left unchanged
+    #     indices_random = torch.rand_like(labels.float()) < 0.1 * probability_matrix
+    #     indices_random = indices_random & masked_indices & ~indices_replaced
+    #     random_words = torch.randint(
+    #         len(self.tokenizer), labels.shape, dtype=torch.long
+    #     )
+    #     input_ids[indices_random] = random_words[indices_random]
+
+    #     # ignore labels for non-masked tokens by setting to -100
+    #     labels[~masked_indices] = -100
+
+    #     batch["input_ids"] = input_ids
+    #     if "attention_mask" in batch:
+    #         # invert attention mask to match behavior of the 🤗 DataCollatorForLanguageModeling
+    #         # 1 should now indicate non-padding tokens and 0 should indicate padding tokens
+    #         batch["attention_mask"] = 1 - torch.tensor(
+    #             batch["attention_mask"], dtype=torch.int
+    #         )
+    #     if "token_type_ids" in batch:
+    #         batch["token_type_ids"] = torch.tensor(
+    #             batch["token_type_ids"], dtype=torch.int
+    #         )
+
+    #     batch["labels"] = labels
+    #     if "mask_probabilities" in batch:
+    #         del batch["mask_probabilities"]
+
+    #     return batch
 
 
 def load_dataset(
