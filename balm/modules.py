@@ -471,6 +471,95 @@ class Expert(nn.Module):
 # =================================
 
 
+class DenseFFN(nn.Module):
+    """
+    Standard (dense) feed-forward network.
+
+    Parameters:
+    -----------
+    model_dim: int
+        Token embedding dimension.
+
+    ffn_dim: int, default=None
+        Feed-forward network dimension. If not provided, it will be set to 4x the model dimension.
+
+    activation: str, default="swiglu"
+        Activation function to use.
+
+    bias: bool, default=True
+        Whether to use bias.
+
+    dropout: float, default=0.0
+        Dropout rate.
+
+    Input shape: (batch_size, seq_len, model_dim)
+    Output shape: (batch_size, seq_len, model_dim)
+
+    """
+
+    def __init__(
+        self,
+        model_dim: int,
+        ffn_dim: int = None,
+        activation: str = "swiglu",
+        bias: bool = True,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        self.wi = nn.Linear(model_dim, ffn_dim, bias=bias)
+        self.wo = nn.Linear(ffn_dim, model_dim, bias=bias)
+        self.activation = get_activation_fn(activation, dim=ffn_dim)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass for the DenseFFN layer.
+
+        Parameters:
+        -----------
+        x : torch.Tensor
+            Input tensor of shape (batch_size, seq_len, model_dim).
+
+        Returns:
+        --------
+        x : torch.Tensor
+            Output tensor of shape (batch_size, seq_len, model_dim).
+
+        """
+        x = self.wi(x)
+        x = self.activation(x)
+        x = self.dropout(x)
+        x = self.wo(x)
+        return x
+
+
+class SwigluFFN(nn.Module):
+    """
+    SwiGLU-activated feed-forward network.
+    """
+
+    def __init__(
+        self,
+        model_dim: int,
+        ffn_dim: int = None,
+        bias: bool = True,
+        dropout: float = 0.0,
+        activation: str = "swiglu",  # to make init signature compatible with DenseFFN
+    ):
+        super().__init__()
+        self.gate_linear = nn.Linear(model_dim, ffn_dim, bias=bias)
+        self.value_linear = nn.Linear(model_dim, ffn_dim, bias=bias)
+        self.wo = nn.Linear(ffn_dim, model_dim, bias=bias)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        gate = self.gate_linear(x)
+        value = self.value_linear(x)
+        x = value * F.silu(gate)
+        x = self.dropout(self.wo(x))
+        return x
+
+
 class SparseFFN(nn.Module):
     """Sparse Mixture of Experts layer with capacity constraints.
 
@@ -517,10 +606,14 @@ class SparseFFN(nn.Module):
         dropout: float = 0.0,
     ):
         super().__init__()
+        # router
         self.router = TopKRouter(model_dim, num_experts)
+
+        # experts
+        expert_class = SwigluFFN if activation.lower() == "swiglu" else DenseFFN
         self.experts = nn.ModuleList(
             [
-                Expert(
+                expert_class(
                     model_dim=model_dim,
                     ffn_dim=ffn_dim,
                     activation=activation,
@@ -533,6 +626,7 @@ class SparseFFN(nn.Module):
         self.num_experts = num_experts
         self.k = k
 
+        # capacity
         if isinstance(max_capacity, float):
             self.capacity_multiplier = max_capacity
             self.absolute_capacity = None
@@ -615,69 +709,6 @@ class SparseFFN(nn.Module):
 
         output = output.view(batch_size, seq_len, d_model)
         return output, (logits, indices)
-
-
-class DenseFFN(nn.Module):
-    """
-    Standard (dense) feed-forward network.
-
-    Parameters:
-    -----------
-    model_dim: int
-        Token embedding dimension.
-
-    ffn_dim: int, default=None
-        Feed-forward network dimension. If not provided, it will be set to 4x the model dimension.
-
-    activation: str, default="swiglu"
-        Activation function to use.
-
-    bias: bool, default=True
-        Whether to use bias.
-
-    dropout: float, default=0.0
-        Dropout rate.
-
-    Input shape: (batch_size, seq_len, model_dim)
-    Output shape: (batch_size, seq_len, model_dim)
-
-    """
-
-    def __init__(
-        self,
-        model_dim: int,
-        ffn_dim: int = None,
-        activation: str = "swiglu",
-        bias: bool = True,
-        dropout: float = 0.0,
-    ):
-        super().__init__()
-        ffn_dim = ffn_dim or 4 * model_dim
-        self.wi = nn.Linear(model_dim, ffn_dim, bias=bias)
-        self.wo = nn.Linear(ffn_dim, model_dim, bias=bias)
-        self.activation = get_activation_fn(activation, dim=ffn_dim)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass for the DenseFFN layer.
-
-        Parameters:
-        -----------
-        x : torch.Tensor
-            Input tensor of shape (batch_size, seq_len, model_dim).
-
-        Returns:
-        --------
-        x : torch.Tensor
-            Output tensor of shape (batch_size, seq_len, model_dim).
-
-        """
-        x = self.wi(x)
-        x = self.activation(x)
-        x = self.dropout(x)
-        x = self.wo(x)
-        return x
 
 
 # class SparseMLP(nn.Module):
@@ -1180,7 +1211,8 @@ class DenseTransformerLayer(nn.Module):
         )
 
         # FFN
-        self.ffn = DenseFFN(
+        ffn_class = SwigluFFN if activation.lower() == "swiglu" else DenseFFN
+        self.ffn = ffn_class(
             model_dim=model_dim,
             ffn_dim=ffn_dim,
             activation=activation,
