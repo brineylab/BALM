@@ -528,9 +528,7 @@ class DenseFFN(nn.Module):
         """
         x = self.wi(x)
         x = self.activation(x)
-        x = self.dropout(x)
-        x = self.wo(x)
-        return x
+        return self.dropout(self.wo(x))
 
 
 class SwigluFFN(nn.Module):
@@ -556,8 +554,7 @@ class SwigluFFN(nn.Module):
         gate = self.gate_linear(x)
         value = self.value_linear(x)
         x = value * F.silu(gate)
-        x = self.dropout(self.wo(x))
-        return x
+        return self.dropout(self.wo(x))
 
 
 class SparseFFN(nn.Module):
