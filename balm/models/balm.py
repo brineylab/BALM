@@ -7,12 +7,12 @@ from typing import Optional, Union
 
 import torch
 import torch.nn as nn
-from transformers import PretrainedConfig, PreTrainedModel
+from transformers import PretrainedConfig
 
 from ..config import BalmConfig
 from ..modules import BalmLMHead, BalmSequenceClassificationHead, DenseTransformerLayer
 from ..outputs import BaseModelOutput, MaskedLMOutput, SequenceClassifierOutput
-from .base import FreezeBaseModelMixin, ParameterCountMixin
+from .base import BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin
 
 __all__ = [
     "BalmModel",
@@ -21,7 +21,7 @@ __all__ = [
 ]
 
 
-class BalmModel(PreTrainedModel, ParameterCountMixin):
+class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
     config_class = BalmConfig
     base_model_prefix = None
 
@@ -48,7 +48,12 @@ class BalmModel(PreTrainedModel, ParameterCountMixin):
         self.layers = nn.ModuleList(
             [
                 DenseTransformerLayer(
-                    config=config,
+                    model_dim=self.config.hidden_size,
+                    ffn_dim=self.config.intermediate_size,
+                    num_heads=self.config.num_attention_heads,
+                    activation=self.config.activation,
+                    dropout=self.config.dropout,
+                    position_embedding_type=self.config.position_embedding_type,
                 )
                 for _ in range(config.num_hidden_layers)
             ]
@@ -67,6 +72,8 @@ class BalmModel(PreTrainedModel, ParameterCountMixin):
         token_type_ids: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[BaseModelOutput, tuple]:
         """
@@ -92,6 +99,12 @@ class BalmModel(PreTrainedModel, ParameterCountMixin):
             Input embeddings, of shape (batch_size, sequence_length, hidden_size). Cannot be provided
             if `input_ids` is also provided.
 
+        output_attentions: bool
+            Whether to output the attentions.
+
+        output_hidden_states: bool
+            Whether to output the hidden states.
+
         return_dict: bool
             Whether to return a dictionary of outputs (returns a tuple if False)
 
@@ -113,8 +126,8 @@ class BalmModel(PreTrainedModel, ParameterCountMixin):
 
         """
         # init
-        all_self_attentions = () if self.config.output_attentions else None
-        all_hidden_states = () if self.config.output_hidden_states else None
+        all_self_attentions = () if output_attentions else None
+        all_hidden_states = () if output_hidden_states else None
         return_dict = (
             return_dict if return_dict is not None else self.config.return_dict
         )
@@ -143,27 +156,27 @@ class BalmModel(PreTrainedModel, ParameterCountMixin):
 
         # layers
         for layer in self.layers:
-            if self.config.output_hidden_states:
+            if output_hidden_states:
                 all_hidden_states += (x,)
 
             x = layer(
                 x,
-                attention_mask=attention_mask,
+                padding_mask=attention_mask,
+                need_weights=output_attentions,
             )
-            if self.config.output_attentions:
+            if output_attentions:
                 x, attn = x
                 all_self_attentions += (attn,)
 
         # final layer norm
-        if self.config.pre_norm:
-            x = self.final_norm(x)
+        x = self.final_norm(x)
 
         # save the last hidden state
-        if self.config.output_hidden_states:
+        if output_hidden_states:
             all_hidden_states += (x,)
 
         # outputs
-        if not self.config.return_dict:
+        if not return_dict:
             return tuple(
                 v
                 for v in [
@@ -296,7 +309,7 @@ class BalmModel(PreTrainedModel, ParameterCountMixin):
 #         )
 
 
-class BalmForMaskedLM(PreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin):
+class BalmForMaskedLM(BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin):
     """
     BALM model for masked language modeling.
     Uses the BALM encoder and adds a masked language modeling head.
@@ -316,6 +329,8 @@ class BalmForMaskedLM(PreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin
         config: BalmConfig,
     ):
         super().__init__(config)
+        self.config = config
+
         # model
         self.balm = BalmModel(config=self.config)
 
@@ -331,11 +346,15 @@ class BalmForMaskedLM(PreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin
 
     def forward(
         self,
-        input_ids: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        key_padding_mask: Optional[torch.Tensor] = None,
-        labels: Optional[torch.Tensor] = None,
+        input_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.BoolTensor] = None,
+        token_type_ids: Optional[torch.LongTensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
+        labels: Optional[torch.Tensor] = None,
     ) -> Union[MaskedLMOutput, tuple]:
         """
         Forward pass
@@ -348,8 +367,21 @@ class BalmForMaskedLM(PreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin
         attention_mask: torch.BoolTensor
             Attention mask
 
-        key_padding_mask: torch.BoolTensor
-            Key padding mask. Not used (use attention_mask instead)
+        token_type_ids: torch.LongTensor
+            Token type IDs, of shape (batch_size, sequence_length).
+
+        position_ids: torch.LongTensor
+            Position IDs, of shape (batch_size, sequence_length).
+
+        inputs_embeds: torch.FloatTensor
+            Input embeddings, of shape (batch_size, sequence_length, hidden_size). Cannot be provided
+            if `input_ids` is also provided.
+
+        output_attentions: bool
+            Whether to output the attentions.
+
+        output_hidden_states: bool
+            Whether to output the hidden states.
 
         labels: torch.LongTensor
             Labels
@@ -363,11 +395,20 @@ class BalmForMaskedLM(PreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin
             If `return_dict` is ``True``, the output is a ``MaskedLMOutput`` object
 
         """
+        # init
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError("You cannot provide both input_ids and inputs_embeds")
+
         # encoder
         outputs = self.balm(
             input_ids,
             attention_mask=attention_mask,
-            return_dict=True,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            inputs_embeds=inputs_embeds,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
         )
         x = outputs.last_hidden_state
 
@@ -400,6 +441,133 @@ class BalmForMaskedLM(PreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin
             logits=lm_logits,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
+        )
+
+
+class BalmForSequenceClassification(
+    BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin
+):
+    """
+    BALM model for sequence classification.
+    Uses the BALM encoder and adds a sequence-level classification head.
+
+    Parameters
+    ----------
+    config : BalmConfig
+        Configuration object defining model architecture and hyperparameters.
+
+    """
+
+    config_class = BalmConfig
+    base_model_prefix = "balm"
+
+    def __init__(
+        self,
+        config: BalmConfig,
+    ):
+        super().__init__(config)
+        # model
+        self.balm = BalmModel(config=self.config)
+
+        # classifier
+        classifier_dropout = (
+            self.config.classifier_dropout
+            if self.config.classifier_dropout is not None
+            else self.config.dropout
+        )
+        self.classifier = BalmSequenceClassificationHead(
+            hidden_size=self.config.hidden_size,
+            num_labels=self.config.num_labels,
+            dropout=classifier_dropout,
+            activation=self.config.classifier_activation,
+        )
+
+        # loss function
+        self.criterion = nn.CrossEntropyLoss()
+
+    def forward(
+        self,
+        input_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.BoolTensor] = None,
+        token_type_ids: Optional[torch.LongTensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+        labels: Optional[torch.Tensor] = None,
+    ) -> Union[SequenceClassifierOutput, tuple]:
+        """
+        Forward pass
+
+        Parameters
+        ----------
+        input_ids: torch.LongTensor
+            Tokenized input IDs
+
+        attention_mask: torch.BoolTensor
+            Attention mask
+
+        key_padding_mask: torch.BoolTensor
+            Key padding mask
+
+        labels: torch.LongTensor
+            Labels
+
+        return_dict: bool
+            Whether to return a dictionary of outputs (returns a tuple if False)
+        """
+        # init
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError("You cannot provide both input_ids and inputs_embeds")
+
+        # encoder
+        outputs = self.balm(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            inputs_embeds=inputs_embeds,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+        x = outputs.last_hidden_state
+
+        # classifier
+        classifier_logits = self.classifier(x)
+
+        # classification loss
+        classifier_loss = None
+        if labels is not None:
+            labels = labels.to(classifier_logits.device)
+            classifier_loss = self.criterion(
+                classifier_logits.view(-1, self.config.num_labels),
+                labels.view(-1),
+            )
+        else:
+            loss = None
+
+        # outputs
+        if not return_dict:
+            return tuple(
+                v
+                for v in [
+                    loss,
+                    classifier_logits,
+                    outputs.hidden_states,
+                    outputs.attentions,
+                    classifier_loss,
+                ]
+                if v is not None
+            )
+
+        return SequenceClassifierOutput(
+            loss=loss,
+            logits=classifier_logits,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+            classifier_loss=classifier_loss,
         )
 
 
@@ -526,120 +694,120 @@ class BalmForMaskedLM(PreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin
 #         )
 
 
-class BalmForSequenceClassification(
-    PreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin
-):
-    """
-    BALM model for sequence classification.
-    Uses the BALM encoder and adds a sequence-level classification head.
+# class BalmForSequenceClassification(
+#     BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin
+# ):
+#     """
+#     BALM model for sequence classification.
+#     Uses the BALM encoder and adds a sequence-level classification head.
 
-    Parameters
-    ----------
-    config : BalmConfig
-        Configuration object defining model architecture and hyperparameters.
+#     Parameters
+#     ----------
+#     config : BalmConfig
+#         Configuration object defining model architecture and hyperparameters.
 
-    """
+#     """
 
-    config_class = BalmConfig
-    base_model_prefix = "balm"
+#     config_class = BalmConfig
+#     base_model_prefix = "balm"
 
-    def __init__(
-        self,
-        config: BalmConfig,
-    ):
-        super().__init__(config)
-        # model
-        self.balm = BalmModel(config=self.config)
+#     def __init__(
+#         self,
+#         config: BalmConfig,
+#     ):
+#         super().__init__(config)
+#         # model
+#         self.balm = BalmModel(config=self.config)
 
-        # classifier
-        classifier_dropout = (
-            self.config.classifier_dropout
-            if self.config.classifier_dropout is not None
-            else self.config.dropout
-        )
-        self.classifier = BalmSequenceClassificationHead(
-            hidden_size=self.config.hidden_size,
-            num_labels=self.config.num_labels,
-            dropout=classifier_dropout,
-            activation=self.config.classifier_activation,
-        )
+#         # classifier
+#         classifier_dropout = (
+#             self.config.classifier_dropout
+#             if self.config.classifier_dropout is not None
+#             else self.config.dropout
+#         )
+#         self.classifier = BalmSequenceClassificationHead(
+#             hidden_size=self.config.hidden_size,
+#             num_labels=self.config.num_labels,
+#             dropout=classifier_dropout,
+#             activation=self.config.classifier_activation,
+#         )
 
-        # loss function
-        self.criterion = nn.CrossEntropyLoss()
+#         # loss function
+#         self.criterion = nn.CrossEntropyLoss()
 
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        key_padding_mask: Optional[torch.Tensor] = None,
-        labels: Optional[torch.Tensor] = None,
-        return_dict: bool = True,
-    ) -> Union[SequenceClassifierOutput, tuple]:
-        """
-        Forward pass
+#     def forward(
+#         self,
+#         input_ids: torch.Tensor,
+#         attention_mask: Optional[torch.Tensor] = None,
+#         key_padding_mask: Optional[torch.Tensor] = None,
+#         labels: Optional[torch.Tensor] = None,
+#         return_dict: bool = True,
+#     ) -> Union[SequenceClassifierOutput, tuple]:
+#         """
+#         Forward pass
 
-        Parameters
-        ----------
-        input_ids: torch.LongTensor
-            Tokenized input IDs
+#         Parameters
+#         ----------
+#         input_ids: torch.LongTensor
+#             Tokenized input IDs
 
-        attention_mask: torch.BoolTensor
-            Attention mask
+#         attention_mask: torch.BoolTensor
+#             Attention mask
 
-        key_padding_mask: torch.BoolTensor
-            Key padding mask
+#         key_padding_mask: torch.BoolTensor
+#             Key padding mask
 
-        labels: torch.LongTensor
-            Labels
+#         labels: torch.LongTensor
+#             Labels
 
-        return_dict: bool
-            Whether to return a dictionary of outputs (returns a tuple if False)
-        """
+#         return_dict: bool
+#             Whether to return a dictionary of outputs (returns a tuple if False)
+#         """
 
-        # encoder
-        outputs = self.balm(
-            input_ids,
-            attention_mask=attention_mask,
-            key_padding_mask=key_padding_mask,
-            return_dict=True,
-        )
-        x = outputs.last_hidden_state
+#         # encoder
+#         outputs = self.balm(
+#             input_ids,
+#             attention_mask=attention_mask,
+#             key_padding_mask=key_padding_mask,
+#             return_dict=True,
+#         )
+#         x = outputs.last_hidden_state
 
-        # classifier
-        classifier_logits = self.classifier(x)
+#         # classifier
+#         classifier_logits = self.classifier(x)
 
-        # classification loss
-        classifier_loss = None
-        if labels is not None:
-            labels = labels.to(classifier_logits.device)
-            classifier_loss = self.criterion(
-                classifier_logits.view(-1, self.config.num_labels),
-                labels.view(-1),
-            )
-        else:
-            loss = None
+#         # classification loss
+#         classifier_loss = None
+#         if labels is not None:
+#             labels = labels.to(classifier_logits.device)
+#             classifier_loss = self.criterion(
+#                 classifier_logits.view(-1, self.config.num_labels),
+#                 labels.view(-1),
+#             )
+#         else:
+#             loss = None
 
-        # outputs
-        if not return_dict:
-            return tuple(
-                v
-                for v in [
-                    loss,
-                    classifier_logits,
-                    outputs.hidden_states,
-                    outputs.attentions,
-                    classifier_loss,
-                ]
-                if v is not None
-            )
+#         # outputs
+#         if not return_dict:
+#             return tuple(
+#                 v
+#                 for v in [
+#                     loss,
+#                     classifier_logits,
+#                     outputs.hidden_states,
+#                     outputs.attentions,
+#                     classifier_loss,
+#                 ]
+#                 if v is not None
+#             )
 
-        return SequenceClassifierOutput(
-            loss=loss,
-            logits=classifier_logits,
-            hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
-            classifier_loss=classifier_loss,
-        )
+#         return SequenceClassifierOutput(
+#             loss=loss,
+#             logits=classifier_logits,
+#             hidden_states=outputs.hidden_states,
+#             attentions=outputs.attentions,
+#             classifier_loss=classifier_loss,
+#         )
 
 
 # class BalmForSequenceClassification(BalmBase):
