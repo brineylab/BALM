@@ -55,9 +55,6 @@ class BalmMoEConfig(PretrainedConfig):
         The type of position embeddings to use.
         Options are "rotary" or "absolute".
 
-    pre_norm : bool, default=True
-        Whether to use pre-normalization.
-
     token_dropout : float, default=0.0
         The dropout probability for the token embeddings.
 
@@ -165,7 +162,7 @@ class BalmMoEConfig(PretrainedConfig):
         initializer_range: float = 0.02,
         layer_norm_eps: float = 1e-12,
         position_embedding_type: str = "rotary",
-        pre_norm: bool = True,
+        # pre_norm: bool = True,
         token_dropout: float = 0.0,
         mask_token_id: int = 31,
         pad_token_id: int = 1,
@@ -222,7 +219,7 @@ class BalmMoEConfig(PretrainedConfig):
         self.initializer_range = float(initializer_range)
         self.layer_norm_eps = float(layer_norm_eps)
         self.position_embedding_type = position_embedding_type.lower()
-        self.pre_norm = bool(pre_norm)
+        # self.pre_norm = bool(pre_norm)
         self.token_dropout = float(token_dropout)
         self.type_vocab_size = int(type_vocab_size)
         self.use_cache = bool(use_cache)
@@ -233,6 +230,7 @@ class BalmMoEConfig(PretrainedConfig):
         self.classifier_activation = classifier_activation.lower()
 
         # outputs
+        self.return_dict = bool(return_dict)
         self.output_attentions = bool(output_attentions)
         self.output_hidden_states = bool(output_hidden_states)
         self.output_router_logits = bool(output_router_logits)
