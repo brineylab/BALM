@@ -20,7 +20,8 @@ def router_z_loss(router_logits: torch.Tensor) -> torch.Tensor:
     Parameters
     ----------
     router_logits : float
-        Input logits of shape [batch_size, sequence_length, num_experts]
+        Input logits of shape [batch_size, sequence_length, num_experts] (OLD)
+        new shape: [batch_size * sequence_length, num_experts] (NEW)
 
     Returns
     -------
@@ -31,10 +32,16 @@ def router_z_loss(router_logits: torch.Tensor) -> torch.Tensor:
     .. _Designing Effective Sparse Expert Models:
         https://arxiv.org/abs/2202.08906
     """
-    num_groups, tokens_per_group, _ = router_logits.shape
+    # num_groups, tokens_per_group, _ = router_logits.shape
+    # log_z = torch.logsumexp(router_logits, dim=-1)
+    # z_loss = log_z**2
+    # return torch.sum(z_loss) / (num_groups * tokens_per_group)
+
+    # rewrite for logits flattened along the batch dimension
+    num_tokens, _ = router_logits.shape
     log_z = torch.logsumexp(router_logits, dim=-1)
     z_loss = log_z**2
-    return torch.sum(z_loss) / (num_groups * tokens_per_group)
+    return torch.sum(z_loss) / num_tokens
 
 
 def router_load_balancing_loss(
@@ -71,32 +78,58 @@ def router_load_balancing_loss(
     .. _Switch Transformer paper:
         https://arxiv.org/abs/2101.03961
     """
+    # if expert_indices.dtype != torch.int64:
+    #     expert_indices = expert_indices.to(torch.int64)
+    # if expert_indices.ndim == 2:
+    #     expert_indices = expert_indices.unsqueeze(-1)  # [B, S] -> [B, S, 1]
+
+    # # create a one-hot mask for the chosen experts
+    # num_experts = router_probs.shape[-1]
+    # expert_mask = F.one_hot(expert_indices, num_classes=num_experts)  # [B, S, K, E]
+
+    # # sum over the K dimension to handle top-k > 1.
+    # # expert_mask goes from [B, S, K, E] -> [B, S, E], where values can be:
+    # #   - 1 if that expert is chosen among the top-k experts
+    # #   - 0 otherwise.
+    # # for K>1, if multiple experts are chosen, there will be multiple ones.
+    # expert_mask = expert_mask.sum(dim=-2).to(router_probs.dtype)  # [B, S, E]
+
+    # # actual (G_j) and expected (P_j) distribution of tokens per expert
+    # tokens_per_group_and_expert = expert_mask.mean(dim=[0, 1])  # [E]
+    # router_prob_per_group_and_expert = router_probs.mean(dim=[0, 1])  # [E]
+
+    # # according to the Switch Transformer paper, the load balancing loss is:
+    # #     L_aux = mean(G_j * P_j) * (num_experts^2)
+    # # this encourages the observed fraction (G_j) to match the predicted fraction (P_j)
+    # return torch.mean(
+    #     tokens_per_group_and_expert * router_prob_per_group_and_expert
+    # ) * (num_experts**2)
+
+    # rewrite for data flattened along the batch dimension
     if expert_indices.dtype != torch.int64:
         expert_indices = expert_indices.to(torch.int64)
-    if expert_indices.ndim == 2:
-        expert_indices = expert_indices.unsqueeze(-1)  # [B, S] -> [B, S, 1]
+    # if expert_indices.ndim == 2:
+    #     expert_indices = expert_indices.unsqueeze(-1)  # [B, S] -> [B, S, 1]
 
     # create a one-hot mask for the chosen experts
     num_experts = router_probs.shape[-1]
-    expert_mask = F.one_hot(expert_indices, num_classes=num_experts)  # [B, S, K, E]
+    expert_mask = F.one_hot(expert_indices, num_classes=num_experts)  # [T, K, E]
 
     # sum over the K dimension to handle top-k > 1.
     # expert_mask goes from [B, S, K, E] -> [B, S, E], where values can be:
     #   - 1 if that expert is chosen among the top-k experts
     #   - 0 otherwise.
     # for K>1, if multiple experts are chosen, there will be multiple ones.
-    expert_mask = expert_mask.sum(dim=-2).to(router_probs.dtype)  # [B, S, E]
+    expert_mask = expert_mask.sum(dim=-2).to(router_probs.dtype)  # [T, E]
 
     # actual (G_j) and expected (P_j) distribution of tokens per expert
-    tokens_per_group_and_expert = expert_mask.mean(dim=[0, 1])  # [E]
-    router_prob_per_group_and_expert = router_probs.mean(dim=[0, 1])  # [E]
+    tokens_per_expert = expert_mask.mean(dim=0)  # [E]
+    router_prob_per_expert = router_probs.mean(dim=0)  # [E]
 
     # according to the Switch Transformer paper, the load balancing loss is:
     #     L_aux = mean(G_j * P_j) * (num_experts^2)
     # this encourages the observed fraction (G_j) to match the predicted fraction (P_j)
-    return torch.mean(
-        tokens_per_group_and_expert * router_prob_per_group_and_expert
-    ) * (num_experts**2)
+    return torch.mean(tokens_per_expert * router_prob_per_expert) * (num_experts**2)
 
 
 # def router_load_balancing_loss(
