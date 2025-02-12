@@ -322,9 +322,7 @@ class Expert(nn.Module):
             model_dim,
             bias=bias,
         )
-        self.activation = get_activation_fn(
-            activation, model_dim=model_dim, ffn_dim=ffn_dim
-        )
+        self.activation = get_activation_fn(activation, dim=ffn_dim)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -657,9 +655,7 @@ class DenseFFN(nn.Module):
         ffn_dim = ffn_dim or 4 * model_dim
         self.wi = nn.Linear(model_dim, ffn_dim, bias=bias)
         self.wo = nn.Linear(ffn_dim, model_dim, bias=bias)
-        self.activation = get_activation_fn(
-            activation, model_dim=model_dim, ffn_dim=ffn_dim
-        )
+        self.activation = get_activation_fn(activation, dim=ffn_dim)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

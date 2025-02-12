@@ -13,8 +13,7 @@ __all__ = ["SwiGLU", "GeGLU", "ReGLU", "get_activation_fn"]
 
 def get_activation_fn(
     activation: Union[str, nn.Module],
-    model_dim: int | None = None,
-    ffn_dim: int | None = None,
+    dim: int | None = None,
 ) -> nn.Module:
     """
     Get an activation function from a string or a PyTorch module.
@@ -58,7 +57,7 @@ def get_activation_fn(
         elif activation == "glu":
             return nn.GLU()
         elif activation == "swiglu":
-            return SwiGLU(model_dim=model_dim, ffn_dim=ffn_dim)
+            return SwiGLU(dim=dim)
         elif activation == "geglu":
             return GeGLU()
         elif activation == "reglu":
@@ -111,13 +110,11 @@ class SwiGLU(nn.Module):
 
     """
 
-    def __init__(self, model_dim: int | None = None, ffn_dim: int | None = None):
+    def __init__(self, dim: int | None = None):
         super().__init__()
-        if model_dim is not None:
-            ffn_dim = ffn_dim or model_dim * 4
-            self.gate_linear = nn.Linear(model_dim, ffn_dim)
-            self.value_linear = nn.Linear(model_dim, ffn_dim)
-            self.wo = nn.Linear(ffn_dim, model_dim)
+        if dim is not None:
+            self.gate_linear = nn.Linear(dim, dim)
+            self.value_linear = nn.Linear(dim, dim)
             self.chunked_version = False
         else:
             self.chunked_version = True
@@ -129,7 +126,7 @@ class SwiGLU(nn.Module):
         else:
             gate = self.gate_linear(x)
             value = self.value_linear(x)
-            return self.wo(value * F.silu(gate))
+            return value * F.silu(gate)
 
 
 class GeGLU(nn.Module):
