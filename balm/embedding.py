@@ -14,57 +14,102 @@ __all__ = [
 ]
 
 
+def apply_rotary_emb(q_or_k, sin, cos):
+    # q_or_k: (batch_size, seq_len, num_heads, head_dim)
+    # split last dim into 2 halves
+    q1, q2 = q_or_k.chunk(2, dim=-1)
+    # each has shape (..., head_dim/2)
+    return torch.cat([q1 * cos - q2 * sin, q2 * cos + q1 * sin], dim=-1)
+
+
 class RotaryPositionalEmbedding(nn.Module):
-    """
-    Rotary positional embeddings, as initially described in the
-    `RoFormer: Enhanced Transformer with Rotary Position Embeddings`_ paper.
-
-    Parameters
-    ----------
-    dim: int
-        The embedding dimension.
-
-    .. _RoFormer: Enhanced Transformer with Rotary Position Embeddings:
-        https://arxiv.org/abs/2104.09864
-
-    """
-
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, base: int = 10000):
         super().__init__()
         self.dim = dim
+        self.base = base
+        # frequencies for the "half-dim"
+        half_dim = dim // 2
+        inv_freq = 1.0 / (base ** (torch.arange(0, half_dim, 1).float() / half_dim))
+        self.register_buffer("inv_freq", inv_freq)
 
-    def forward(self, x: torch.Tensor, seq_len: Optional[int] = None) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, positions: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         """
-        Apply rotary positional embeddings to the input tensor.
-
-        Parameters
-        ----------
-        x: torch.Tensor
-            The input tensor. Expected shape is (batch, seq_len, hidden_size).
-
-        seq_len: Optional[int]
-            The sequence length. If not provided, the sequence length is inferred from the input tensor.
-
-        Returns
-        -------
-        torch.Tensor
-            The input tensor with rotary positional embeddings applied. The shape is (batch, seq_len, hidden_size).
-
+        x.shape = (batch_size, seq_len, num_heads, dim)
+        positions.shape = (batch_size, seq_len) or None
         """
-        b, n, d = x.size()  # [batch, seq_len, hidden_size]
-        if seq_len is None:
-            seq_len = n
-        half_d = d // 2
-        position = torch.arange(seq_len, device=x.device).unsqueeze(1)
-        freqs = torch.exp(
-            -math.log(10000) * torch.arange(0, half_d, device=x.device).float() / half_d
-        )
-        angles = position * freqs.unsqueeze(0)
+        bsz, seq_len, num_heads, head_dim = x.shape
+        # if no positions given, assume 0..seq_len-1 for each example
+        if positions is None:
+            positions = torch.arange(seq_len, device=x.device)
+            positions = positions.unsqueeze(0).expand(bsz, seq_len)  # (b, s)
+
+        # shape = (b, s, half_dim)
+        angles = positions.unsqueeze(-1).to(x.dtype) * self.inv_freq.unsqueeze(
+            0
+        ).unsqueeze(0)
+        # or use torch.einsum('bs, d -> bsd', positions, self.inv_freq)
+
+        # We want to broadcast across heads => shape (b, s, num_heads, half_dim)
+        angles = angles.unsqueeze(2)  # (b, s, 1, half_dim)
+        angles = angles.expand(-1, -1, num_heads, -1)
+
         sin, cos = angles.sin(), angles.cos()
+        return apply_rotary_emb(x, sin, cos)
 
-        x1, x2 = x[..., :half_d], x[..., half_d:]
-        x_rotated = torch.cat([x1 * cos - x2 * sin, x2 * cos + x1 * sin], dim=-1)
-        return x_rotated  # [batch, seq_len, hidden_size]
+
+# class RotaryPositionalEmbedding(nn.Module):
+#     """
+#     Rotary positional embeddings, as initially described in the
+#     `RoFormer: Enhanced Transformer with Rotary Position Embeddings`_ paper.
+
+#     Parameters
+#     ----------
+#     dim: int
+#         The embedding dimension.
+
+#     .. _RoFormer: Enhanced Transformer with Rotary Position Embeddings:
+#         https://arxiv.org/abs/2104.09864
+
+#     """
+
+#     def __init__(self, dim: int):
+#         super().__init__()
+#         self.dim = dim
+
+#     def forward(self, x: torch.Tensor, seq_len: Optional[int] = None) -> torch.Tensor:
+#         """
+#         Apply rotary positional embeddings to the input tensor.
+
+#         Parameters
+#         ----------
+#         x: torch.Tensor
+#             The input tensor. Expected shape is (batch, seq_len, hidden_size).
+
+#         seq_len: Optional[int]
+#             The sequence length. If not provided, the sequence length is inferred from the input tensor.
+
+#         Returns
+#         -------
+#         torch.Tensor
+#             The input tensor with rotary positional embeddings applied. The shape is (batch, seq_len, hidden_size).
+
+#         """
+#         b, n, d = x.size()  # [batch, seq_len, hidden_size]
+#         if seq_len is None:
+#             seq_len = n
+#         half_d = d // 2
+#         position = torch.arange(seq_len, device=x.device).unsqueeze(1)
+#         freqs = torch.exp(
+#             -math.log(10000) * torch.arange(0, half_d, device=x.device).float() / half_d
+#         )
+#         angles = position * freqs.unsqueeze(0)
+#         sin, cos = angles.sin(), angles.cos()
+
+#         x1, x2 = x[..., :half_d], x[..., half_d:]
+#         x_rotated = torch.cat([x1 * cos - x2 * sin, x2 * cos + x1 * sin], dim=-1)
+#         return x_rotated  # [batch, seq_len, hidden_size]
 
 
 class RelativePositionalEmbedding(nn.Module):
