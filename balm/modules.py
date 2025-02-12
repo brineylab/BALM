@@ -10,16 +10,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import PretrainedConfig
 
-from .activation import SwiGLU, get_activation_fn
+from .activation import get_activation_fn
 from .embedding import RelativePositionalEmbedding, RotaryPositionalEmbedding
-from .router import ExpertChoiceRouter, TopKRouter
+from .router import TopKRouter
 
 __all__ = [
     # layers
     "DenseTransformerLayer",
     "SparseTransformerLayer",
     "HybridSparseTransformerLayer",
-    "SparseMLP",
+    "SparseFFN",
     "Expert",
     # heads
     "BalmLMHead",
@@ -281,29 +281,49 @@ class Expert(nn.Module):
 
     Parameters:
     -----------
-    config : PretrainedConfig
-        Configuration object.
+    model_dim : int
+        Model dimension.
+
+    ffn_dim : int
+        Feed-forward network dimension.
+
+    dropout : float, optional
+        Dropout rate. The default is 0.0.
+
+    activation : str, optional
+        Activation function to use. The default is "swiglu".
+
+    bias : bool, optional
+        Whether to use bias. The default is True.
+
+    Returns
+    -------
+    x : torch.Tensor
+        Output tensor of shape (batch_size, sequence_length, model_dim).
 
     """
 
     def __init__(
         self,
-        config: PretrainedConfig,
+        model_dim: int,
+        ffn_dim: int,
+        dropout: float = 0.0,
+        activation: str = "swiglu",
+        bias: bool = True,
     ):
         super().__init__()
-        factor = 2 if config.expert_activation.lower() == "swiglu" else 1
         self.wi = nn.Linear(
-            config.hidden_size,
-            config.intermediate_size * factor,
-            bias=config.expert_bias,
+            model_dim,
+            ffn_dim,
+            bias=bias,
         )
         self.wo = nn.Linear(
-            config.intermediate_size,
-            config.hidden_size,
-            bias=config.expert_bias,
+            ffn_dim,
+            model_dim,
+            bias=bias,
         )
-        self.activation = get_activation_fn(config.expert_activation)
-        self.dropout = nn.Dropout(config.expert_dropout)
+        self.activation = get_activation_fn(activation, dim=model_dim)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -324,6 +344,58 @@ class Expert(nn.Module):
         x = self.dropout(x)
         x = self.wo(x)
         return x
+
+
+# class Expert(nn.Module):
+#     """
+#     Expert module for a Sparse Transformer layer.
+
+#     Parameters:
+#     -----------
+#     config : PretrainedConfig
+#         Configuration object.
+
+#     """
+
+#     def __init__(
+#         self,
+#         config: PretrainedConfig,
+#     ):
+#         super().__init__()
+#         self.wi = nn.Linear(
+#             config.hidden_size,
+#             config.intermediate_size,
+#             bias=config.expert_bias,
+#         )
+#         self.wo = nn.Linear(
+#             config.intermediate_size,
+#             config.hidden_size,
+#             bias=config.expert_bias,
+#         )
+#         self.activation = get_activation_fn(
+#             config.expert_activation, dim=config.hidden_size
+#         )
+#         self.dropout = nn.Dropout(config.expert_dropout)
+
+#     def forward(self, x: torch.Tensor) -> torch.Tensor:
+#         """
+#         Process the input hidden states.
+
+#         Parameters:
+#         -----------
+#         x : torch.Tensor
+#             Input tensor of shape (batch_size, sequence_length, embed_dim).
+
+#         Returns:
+#         --------
+#         x : torch.Tensor
+#             Output tensor of shape (batch_size, sequence_length, embed_dim).
+#         """
+#         x = self.wi(x)
+#         x = self.activation(x)
+#         x = self.dropout(x)
+#         x = self.wo(x)
+#         return x
 
 
 # class Expert(nn.Module):
@@ -399,68 +471,379 @@ class Expert(nn.Module):
 # =================================
 
 
-class SparseMLP(nn.Module):
-    """
-    Sparse MLP layer, consisting of a router and a set of experts.
+class SparseFFN(nn.Module):
+    """Sparse Mixture of Experts layer with capacity constraints.
 
     Parameters:
     -----------
-    config : PretrainedConfig
-        Configuration object.
+    model_dim: int
+        Token embedding dimension.
+
+    ffn_dim: int, default=None
+        Feed-forward network dimension. If not provided, it will be set to 4x the model dimension.
+
+    activation: str, default="swiglu"
+        Activation function to use.
+
+    bias: bool, default=True
+        Whether to use bias.
+
+    dropout: float, default=0.0
+        Dropout rate.
+
+    num_experts: int
+        Number of experts.
+
+    max_capacity: Union[int, float], default=1.0
+        Expert capacity (int = absolute, float = multiplier).
+
+    k: int, default=1
+        Number of experts per token.
+
+    Input shape: (batch_size, seq_len, model_dim)
+    Output shape: (batch_size, seq_len, model_dim)
 
     """
 
-    def __init__(self, config: PretrainedConfig):
+    def __init__(
+        self,
+        model_dim: int,
+        ffn_dim: int,
+        num_experts: int,
+        max_capacity: Union[int, float] = 1.0,
+        k: int = 1,
+        activation: str = "swiglu",
+        bias: bool = True,
+        dropout: float = 0.0,
+    ):
         super().__init__()
-        self.config = config
-        self.num_experts = config.num_experts
-        self.experts = nn.ModuleList([Expert(config) for _ in range(self.num_experts)])
-        if config.router_type == "expert choice":
-            self.router = ExpertChoiceRouter(config)
-        else:
-            self.router = TopKRouter(config)
+        self.router = TopKRouter(model_dim, num_experts)
+        self.experts = nn.ModuleList(
+            [
+                Expert(
+                    model_dim=model_dim,
+                    ffn_dim=ffn_dim,
+                    activation=activation,
+                    bias=bias,
+                    dropout=dropout,
+                )
+                for _ in range(num_experts)
+            ]
+        )
+        self.num_experts = num_experts
+        self.k = k
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, Tuple]:
+        if isinstance(max_capacity, float):
+            self.capacity_multiplier = max_capacity
+            self.absolute_capacity = None
+        else:
+            self.absolute_capacity = max_capacity
+            self.capacity_multiplier = None
+
+    def _compute_capacity(self, num_tokens: int) -> int:
         """
-        Sparse MLP forward pass.
+        Determine expert capacity
+
+        Parameters:
+        -----------
+        num_tokens: int
+            Number of tokens in the batch.
+
+        Returns:
+        --------
+        capacity: int
+            Expert capacity.
+
+        """
+        if self.capacity_multiplier:
+            return int(self.capacity_multiplier * num_tokens)
+        return self.absolute_capacity
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass for the SparseFFN layer.
 
         Parameters:
         -----------
         x : torch.Tensor
-            Input tensor of shape (batch_size, sequence_length, embed_dim).
+            Input tensor of shape (batch_size, seq_len, model_dim).
 
         Returns:
         --------
-        output : Tuple[torch.Tensor, Tuple]
-            A tuple containing the following:
-            - x : torch.Tensor
-                Output tensor of shape (batch_size, sequence_length, embed_dim).
-            - router_outputs : Tuple[torch.Tensor, torch.Tensor]
-                A tuple containing the following:
-                    - router_logits : torch.Tensor
-                        Router logits of shape (batch_size, sequence_length, num_experts).
-                    - expert_mask : torch.Tensor
-                        Expert mask of shape (batch_size, sequence_length, num_experts).
+        x : torch.Tensor
+            Output tensor of shape (batch_size, seq_len, model_dim).
 
         """
-        # router
-        expert_mask, router_probs, router_logits = self.router(x)
-        expert_outputs = []
+        batch_size, seq_len, d_model = x.shape
+        num_tokens = batch_size * seq_len
+        x_flat = x.view(-1, d_model)  # (num_tokens, d_model)
 
-        # experts
-        for idx, expert in enumerate(self.experts):
-            token_indices = expert_mask[..., idx].bool()
-            expert_output = expert(x[token_indices]).to(x.dtype)
-            expanded_output = torch.zeros_like(x)
-            expanded_output[token_indices] = expert_output
-            expert_outputs.append(expanded_output)
+        # get routing information
+        logits, probs, indices = self.router(x_flat, self.k)
+        capacity = self._compute_capacity(num_tokens)
 
-        # combine outputs from the selected tokens for each expert
-        x = torch.stack(expert_outputs, dim=-1) * expert_mask.unsqueeze(-2)
-        # multiply by router probs before summing
-        x = torch.sum(x * router_probs.unsqueeze(-2), dim=-1)
+        output = torch.zeros_like(x_flat)
+        for expert_idx, expert in enumerate(self.experts):
+            # find tokens that selected this expert in their top-k
+            mask = (indices == expert_idx).any(dim=1)
+            if not mask.any():
+                continue
+            # get candidate tokens and their scores
+            candidate_indices = torch.nonzero(mask).squeeze(-1)
+            expert_scores = logits[candidate_indices, expert_idx]
+            # sort by descending expert affinity
+            sorted_scores, score_order = torch.sort(expert_scores, descending=True)
+            sorted_candidates = candidate_indices[score_order]
+            # apply capacity constraint
+            if sorted_candidates.numel() > capacity:
+                sorted_candidates = sorted_candidates[:capacity]
+            if sorted_candidates.numel() == 0:
+                continue
+            # get routing weights for selected tokens
+            expert_input = x_flat[sorted_candidates]
+            expert_positions = (indices[sorted_candidates] == expert_idx).nonzero(
+                as_tuple=True
+            )[1]
+            weights = (
+                probs[sorted_candidates]
+                .gather(1, expert_positions.unsqueeze(1))
+                .squeeze(1)
+            )
+            # compute and accumulate expert contribution
+            expert_output = expert(expert_input) * weights.unsqueeze(1)
+            output[sorted_candidates] += expert_output
 
-        return x, (router_logits, expert_mask)
+        output = output.view(batch_size, seq_len, d_model)
+        return output, (logits, indices)
+
+
+class DenseFFN(nn.Module):
+    """
+    Standard (dense) feed-forward network.
+
+    Parameters:
+    -----------
+    model_dim: int
+        Token embedding dimension.
+
+    ffn_dim: int, default=None
+        Feed-forward network dimension. If not provided, it will be set to 4x the model dimension.
+
+    activation: str, default="swiglu"
+        Activation function to use.
+
+    bias: bool, default=True
+        Whether to use bias.
+
+    dropout: float, default=0.0
+        Dropout rate.
+
+    Input shape: (batch_size, seq_len, model_dim)
+    Output shape: (batch_size, seq_len, model_dim)
+
+    """
+
+    def __init__(
+        self,
+        model_dim: int,
+        ffn_dim: int = None,
+        activation: str = "swiglu",
+        bias: bool = True,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        ffn_dim = ffn_dim or 4 * model_dim
+        self.wi = nn.Linear(model_dim, ffn_dim, bias=bias)
+        self.wo = nn.Linear(ffn_dim, model_dim, bias=bias)
+        self.activation = get_activation_fn(activation, dim=model_dim)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass for the DenseFFN layer.
+
+        Parameters:
+        -----------
+        x : torch.Tensor
+            Input tensor of shape (batch_size, seq_len, model_dim).
+
+        Returns:
+        --------
+        x : torch.Tensor
+            Output tensor of shape (batch_size, seq_len, model_dim).
+
+        """
+        x = self.wi(x)
+        x = self.activation(x)
+        x = self.dropout(x)
+        x = self.wo(x)
+        return x
+
+
+# class SparseMLP(nn.Module):
+#     """
+#     Sparse MLP layer, consisting of a router and a set of experts.
+
+#     Parameters:
+#     -----------
+#     config : PretrainedConfig
+#         Configuration object.
+
+#     """
+
+#     def __init__(self, config: PretrainedConfig):
+#         super().__init__()
+#         self.config = config
+#         self.num_experts = config.num_experts
+#         self.experts = nn.ModuleList([Expert(config) for _ in range(self.num_experts)])
+#         if config.router_type == "expert choice":
+#             self.router = ExpertChoiceRouter(config)
+#         else:
+#             self.router = TopKRouter(config)
+
+#     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, Tuple]:
+#         """
+#         Sparse MLP forward pass.
+
+#         Parameters:
+#         -----------
+#         x : torch.Tensor
+#             Input tensor of shape (batch_size, sequence_length, embed_dim).
+
+#         Returns:
+#         --------
+#         output : Tuple[torch.Tensor, Tuple]
+#             A tuple containing the following:
+#             - x : torch.Tensor
+#                 Output tensor of shape (batch_size, sequence_length, embed_dim).
+#             - router_outputs : Tuple[torch.Tensor, torch.Tensor]
+#                 A tuple containing the following:
+#                     - router_logits : torch.Tensor
+#                         Router logits of shape (batch_size, sequence_length, num_experts).
+#                     - expert_mask : torch.Tensor
+#                         Expert mask of shape (batch_size, sequence_length, num_experts).
+
+#         """
+#         # router
+#         expert_mask, router_probs, router_logits = self.router(x)
+#         expert_outputs = []
+
+#         # experts
+#         for idx, expert in enumerate(self.experts):
+#             token_indices = expert_mask[..., idx].bool()
+#             expert_output = expert(x[token_indices]).to(x.dtype)
+#             expanded_output = torch.zeros_like(x)
+#             expanded_output[token_indices] = expert_output
+#             expert_outputs.append(expanded_output)
+
+#         # combine outputs from the selected tokens for each expert
+#         x = torch.stack(expert_outputs, dim=-1) * expert_mask.unsqueeze(-2)
+#         # multiply by router probs before summing
+#         x = torch.sum(x * router_probs.unsqueeze(-2), dim=-1)
+
+#         return x, (router_logits, expert_mask)
+
+
+# class SparseLayer_R1(nn.Module):
+#     """Sparse Mixture of Experts layer with expert capacity constraints.
+
+#     Parameters
+#     ----------
+#     d_model : int
+#         Token embedding dimension
+
+#     num_experts : int
+#         Number of parallel experts
+
+#     max_capacity : Union[int, float], optional
+#         Expert capacity (int = absolute, float = multiplier)
+#         The default is 1.0.
+
+#     k : int, optional
+#         Number of experts per token (default 1)
+
+#     Input shape: (batch_size, seq_len, d_model)
+#     Output shape: (batch_size, seq_len, d_model)
+
+#     """
+
+#     def __init__(
+#         self,
+#         d_model: int,
+#         num_experts: int,
+#         max_capacity: Union[int, float] = 1.0,
+#         k: int = 1,
+#     ):
+#         super().__init__()
+#         self.router = Router_R1(d_model, num_experts)
+#         self.experts = nn.ModuleList([Expert(d_model) for _ in range(num_experts)])
+#         self.num_experts = num_experts
+#         self.k = k
+
+#         if isinstance(max_capacity, float):
+#             self.capacity_multiplier = max_capacity
+#             self.absolute_capacity = None
+#         else:
+#             self.absolute_capacity = max_capacity
+#             self.capacity_multiplier = None
+
+#     def _compute_capacity(self, num_tokens: int) -> int:
+#         """Determine expert capacity based on configuration."""
+#         if self.capacity_multiplier:
+#             return int(self.capacity_multiplier * num_tokens)
+#         return self.absolute_capacity
+
+#     def forward(self, x: torch.Tensor) -> torch.Tensor:
+#         batch_size, seq_len, d_model = x.shape
+#         num_tokens = batch_size * seq_len
+#         x_flat = x.view(-1, d_model)  # (num_tokens, d_model)
+
+#         # Get routing information
+#         logits, probs, indices = self.router(x_flat, self.k)
+#         capacity = self._compute_capacity(num_tokens)
+
+#         # Initialize output and expert usage tracking
+#         output = torch.zeros_like(x_flat)
+
+#         # Process each expert independently
+#         for expert_idx, expert in enumerate(self.experts):
+#             # Find tokens that selected this expert in their top-k
+#             mask = (indices == expert_idx).any(dim=1)
+#             if not mask.any():
+#                 continue
+
+#             # Get candidate tokens and their scores
+#             candidate_indices = torch.nonzero(mask).squeeze(-1)
+#             expert_scores = logits[candidate_indices, expert_idx]
+
+#             # Sort by descending expert affinity
+#             sorted_scores, score_order = torch.sort(expert_scores, descending=True)
+#             sorted_candidates = candidate_indices[score_order]
+
+#             # Apply capacity constraint
+#             if sorted_candidates.numel() > capacity:
+#                 sorted_candidates = sorted_candidates[:capacity]
+
+#             # Skip empty expert batches
+#             if sorted_candidates.numel() == 0:
+#                 continue
+
+#             # Get routing weights for selected tokens
+#             expert_input = x_flat[sorted_candidates]
+#             expert_positions = (indices[sorted_candidates] == expert_idx).nonzero(
+#                 as_tuple=True
+#             )[1]
+#             weights = (
+#                 probs[sorted_candidates]
+#                 .gather(1, expert_positions.unsqueeze(1))
+#                 .squeeze(1)
+#             )
+
+#             # Compute and accumulate expert contribution
+#             expert_output = expert(expert_input) * weights.unsqueeze(1)
+#             output[sorted_candidates] += expert_output
+
+#         return output.view(batch_size, seq_len, d_model)
 
 
 # b, s, h = hidden_states.size()  # [batch_size, sequence_length, embed_dim]
@@ -624,6 +1007,121 @@ class SparseMLP(nn.Module):
 
 # =================================
 #
+#           ATTENTION
+#
+# =================================
+
+
+class SelfAttention(nn.Module):
+    """
+    Self-attention block with optional rotary positional embeddings.
+
+    Parameters:
+    -----------
+    model_dim: int
+        Model dimension.
+
+    num_heads: int
+        Number of attention heads.
+
+    dropout: float, default=0.1
+        Dropout rate.
+
+    position_embedding_type: str, default="rotary"
+        Position embedding type. Only used if rotary embeddings are used (i.e. `position_embedding_type="rotary"`).
+    """
+
+    def __init__(
+        self,
+        model_dim: int,
+        num_heads: int,
+        dropout: float = 0.1,
+        position_embedding_type: str = "rotary",
+    ):
+        super().__init__()
+        # embeddings
+        if position_embedding_type == "rotary":
+            self.rotary_embed = RotaryPositionalEmbedding(dim=model_dim // num_heads)
+        else:
+            self.rotary_embed = None
+
+        # attention
+        self.self_attn = nn.MultiheadAttention(
+            embed_dim=model_dim, num_heads=num_heads, dropout=dropout, batch_first=True
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        padding_mask: Optional[torch.Tensor] = None,
+        need_weights: bool = False,
+    ) -> torch.Tensor:
+        """
+        Forward pass for the self-attention layer.
+
+        Parameters:
+        -----------
+        x : torch.Tensor
+            Input tensor of shape (batch_size, seq_len, model_dim).
+
+        padding_mask : Optional[torch.Tensor], default=None
+            Padding mask of shape (batch_size, seq_len).
+
+        need_weights : bool, default=False
+            Whether to return attention weights.
+
+        """
+        # project to query/key/value
+        q, k, v = self._in_proj(x)
+
+        # rotary embeddings
+        if self.rotary_embed is not None:
+            batch_size, seq_len, _ = x.shape
+            positions = torch.arange(seq_len, device=x.device).expand(
+                batch_size, seq_len
+            )
+            # apply rotary embeddings
+            num_heads = self.self_attn.num_heads
+            head_dim = q.size(-1) // num_heads
+            q = q.view(batch_size, seq_len, num_heads, head_dim)
+            k = k.view(batch_size, seq_len, num_heads, head_dim)
+            q = self.rotary_embed(q, positions)
+            k = self.rotary_embed(k, positions)
+            # reshape back to (batch_size, seq_len, model_dim)
+            q = q.view(batch_size, seq_len, -1)
+            k = k.view(batch_size, seq_len, -1)
+
+        # attention
+        attn_out = self.self_attn(
+            query=q,
+            key=k,
+            value=v,
+            key_padding_mask=padding_mask,
+            need_weights=need_weights,
+        )
+        return attn_out
+
+    def _in_proj(
+        self, x: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Extract query/key/value projections using attention's parameters.
+
+        Parameters:
+        -----------
+        x : torch.Tensor
+            Input tensor of shape (batch_size, seq_len, model_dim).
+
+        """
+        # Use attention's combined projection weights/biases
+        combined = F.linear(
+            x, self.self_attn.in_proj_weight, self.self_attn.in_proj_bias
+        )
+        return torch.chunk(combined, 3, dim=-1)
+
+
+# =================================
+#
 #       TRANSFORMER LAYERS
 #
 # =================================
@@ -631,146 +1129,367 @@ class SparseMLP(nn.Module):
 
 class DenseTransformerLayer(nn.Module):
     """
-    Dense transformer layer.
+    Standard (dense) transformer layer
 
     Parameters:
     -----------
-    config : PretrainedConfig
-        Model configuration class with all the parameters of the model.
+    model_dim: int
+        Model dimension.
+
+    ffn_dim: int | None, default=None
+        Feed-forward dimension. If not provided, it will be set to 4x the model dimension.
+
+    num_heads: int, default=20
+        Number of attention heads.
+
+    activation: str, default="swiglu"
+        Activation function to use.
+
+    bias: bool, default=True
+        Whether to use bias.
+
+    dropout: float, default=0.1
+        Dropout rate.
+
+    position_embedding_type: str, default="rotary"
+        Position embedding type. Only used if rotary embeddings are used (i.e. `position_embedding_type="rotary"`).
+
+    Input shape: (batch_size, seq_len, model_dim)
+    Output shape: (batch_size, seq_len, model_dim)
 
     """
 
-    def __init__(self, config: PretrainedConfig):
+    def __init__(
+        self,
+        model_dim: int,
+        ffn_dim: int | None = None,
+        num_heads: int = 20,
+        activation: str = "swiglu",
+        bias: bool = True,
+        dropout: float = 0.1,
+        position_embedding_type: str = "rotary",
+    ):
         super().__init__()
-        self.config = config
-
-        # embeddings
-        if config.position_embedding_type == "rotary":
-            self.rotary_embeddings = RotaryPositionalEmbedding(config.hidden_size)
-
-        # norm
-        self.norm1 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.norm2 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
         # attention
-        # NOTE: if config.output_attentions is True, torch can't use optimized SDPA
-        # see -> https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html
-        self.attention = nn.MultiheadAttention(
-            embed_dim=config.hidden_size,
-            num_heads=config.num_attention_heads,
-            dropout=config.attention_dropout,
-            batch_first=True,
+        self.self_attn = SelfAttention(
+            model_dim=model_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            position_embedding_type=position_embedding_type,
         )
 
-        # feedforward
-        # factor = 2 if config.expert_activation == "swiglu" else 1
-        # self.activation = get_activation_fn(config.activation)
-        # self.feed_forward = nn.Sequential(
-        #     nn.Linear(config.hidden_size, config.intermediate_size * factor),
-        #     self.activation,
-        #     nn.Dropout(config.hidden_dropout),
-        #     nn.Linear(config.intermediate_size, config.hidden_size),
-        # )
-        factor = 2 if config.activation.lower() == "swiglu" else 1
-        self.ffn_in = nn.Linear(config.hidden_size, config.intermediate_size * factor)
-        self.ffn_out = nn.Linear(config.intermediate_size, config.hidden_size)
-        self.ffn_activation = get_activation_fn(config.activation)
+        # FFN
+        self.ffn = DenseFFN(
+            model_dim=model_dim,
+            ffn_dim=ffn_dim,
+            activation=activation,
+            bias=bias,
+        )
+
+        # norm
+        self.norm1 = nn.LayerNorm(model_dim)
+        self.norm2 = nn.LayerNorm(model_dim)
 
         # dropout
-        self.dropout = nn.Dropout(config.dropout)
+        self.dropout1 = nn.Dropout(dropout)  # attention dropout
+        self.dropout2 = nn.Dropout(dropout)  # ffn dropout
 
     def forward(
         self,
         x: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
+        padding_mask: Optional[torch.Tensor] = None,
         need_weights: bool = False,
-    ):
-        """
-        Process the input hidden states.
-
-        Parameters:
-        -----------
-        x : torch.Tensor
-            Input tensor of shape (batch_size, sequence_length, hidden_size).
-
-        attention_mask : torch.Tensor, optional
-            Attention mask of shape (batch_size, sequence_length). The default is None.
-
-        need_weights : bool, optional
-            Whether to return the attention weights. The default is False.
-
-        Returns:
-        --------
-        output : Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
-            If ``config.output_attentions`` is ``True``, the output will be a tuple of
-            (x, attn). Otherwise, the output will be just x.
-
-            x : torch.Tensor
-                Output tensor of shape (batch_size, sequence_length, hidden_size).
-            attn : torch.Tensor
-                Attention weights of shape (batch_size, num_heads, sequence_length, sequence_length).
-
-        """
-
-        # invert attention mask and convert to boolean, since the 🤗 DataCollatorForLanguageModeling
+    ) -> torch.Tensor:
+        # invert padding mask and convert to boolean, since the 🤗 DataCollatorForLanguageModeling
         # uses 0 for padding tokens and 1 for other tokens, but we want True for padding tokens and
         # False for other tokens
-        if attention_mask is not None:
-            attention_mask = 1 - attention_mask
-            attention_mask = attention_mask.bool()
+        if padding_mask is not None:
+            padding_mask = 1 - padding_mask
+            padding_mask = padding_mask.bool()
 
         # pre-norm
         residual = x
-        if self.config.pre_norm:
-            x = self.norm1(x)
-
-        # positional embeddings
-        if self.config.position_embedding_type == "rotary":
-            k = self.rotary_embeddings(x)
-            q = self.rotary_embeddings(x)
-            v = x
-        else:
-            k, q, v = x, x, x
+        x = self.norm1(x)
 
         # attention
-        x = self.attention(
-            k,
-            q,
-            v,
-            key_padding_mask=attention_mask,
+        # NOTE: if need_weights is True, torch can't use optimized SDPA
+        # see -> https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html
+        attn_out = self.self_attn(
+            x,
+            padding_mask=padding_mask,
             need_weights=need_weights,
         )
         if need_weights:
-            x, attn = x
+            attn_out, attn_vals = attn_out
         else:
-            x = x[0]
-        x = residual + self.dropout(x)
+            attn_out = attn_out[0]
+        x = residual + self.dropout1(attn_out)
 
-        # post-norm
-        if not self.config.pre_norm:
-            x = self.norm1(x)
+        # FFN
+        residual = x
+        x = self.norm2(x)
+        x = residual + self.dropout2(self.ffn(x))
+
+        if need_weights:
+            return (x, attn_vals)
+        return x
+
+
+class SparseTransformerLayer(nn.Module):
+    """Sparse Transformer Layer with Rotary Positional Embeddings and Mixture of Experts.
+
+    Args:
+        d_model: Token embedding dimension
+        num_heads: Number of attention heads
+        num_experts: Number of experts in SparseFFN
+        max_capacity: Expert capacity (int = absolute, float = multiplier)
+        k: Number of experts per token (default 1)
+        dropout: Dropout probability (default 0.1)
+
+    Input shape: (batch_size, seq_len, d_model)
+    Output shape: (batch_size, seq_len, d_model)
+    """
+
+    def __init__(
+        self,
+        model_dim: int,
+        ffn_dim: int,
+        num_heads: int,
+        num_experts: int,
+        max_capacity: Union[int, float],
+        k: int = 1,
+        activation: str = "swiglu",
+        bias: bool = True,
+        dropout: float = 0.1,
+        position_embedding_type: str = "rotary",
+    ):
+        super().__init__()
+        self.model_dim = model_dim
+        self.num_heads = num_heads
+        self.head_dim = model_dim // num_heads
+
+        # attention
+        self.self_attn = SelfAttention(
+            model_dim=model_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            position_embedding_type=position_embedding_type,
+        )
+
+        # Sparse FFN components
+        self.sparse_ffn = SparseFFN(
+            model_dim=model_dim,
+            ffn_dim=ffn_dim,
+            num_experts=num_experts,
+            max_capacity=max_capacity,
+            k=k,
+            activation=activation,
+            bias=bias,
+        )
+
+        # norm
+        self.norm1 = nn.LayerNorm(model_dim)
+        self.norm2 = nn.LayerNorm(model_dim)
+
+        # dropout
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        padding_mask: Optional[torch.Tensor] = None,
+        need_weights: bool = False,
+    ) -> torch.Tensor:
+        """
+        Args:
+            x: Input tensor of shape (batch_size, seq_len, d_model)
+            padding_mask: Optional boolean mask indicating padded positions
+                          (batch_size, seq_len)
+            need_weights: Whether to return attention values, default is False
+
+        Returns:
+            torch.Tensor of shape (batch_size, seq_len, d_model)
+        """
+        # invert padding mask and convert to boolean, since the 🤗 DataCollatorForLanguageModeling
+        # uses 0 for padding tokens and 1 for other tokens, but we want True for padding tokens and
+        # False for other tokens
+        if padding_mask is not None:
+            padding_mask = 1 - padding_mask
+            padding_mask = padding_mask.bool()
 
         # pre-norm
         residual = x
-        if self.config.pre_norm:
-            x = self.norm2(x)
+        x = self.norm1(x)
 
-        # feedforward
-        # x = self.feed_forward(x)
-        x = self.ffn_in(x)
-        x = self.ffn_activation(x)
-        x = self.dropout(x)
-        x = self.ffn_out(x)
-        x = residual + x
-
-        # post-norm
-        if not self.config.pre_norm:
-            x = self.norm2(x)
-
-        # outputs
+        # attention
+        # NOTE: if need_weights is True, torch can't use optimized SDPA
+        # see -> https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html
+        attn_out = self.self_attn(
+            x,
+            padding_mask=padding_mask,
+            need_weights=need_weights,
+        )
         if need_weights:
-            return x, attn
-        return x
+            attn_out, attn_vals = attn_out
+        else:
+            attn_out = attn_out[0]
+        x = residual + self.dropout1(attn_out)
+
+        # sparse FFN
+        residual = x
+        x = self.norm2(x)
+        ffn_out, router_tuple = self.sparse_ffn(x)
+        x = residual + self.dropout2(ffn_out)
+
+        if need_weights:
+            return (x, attn_vals, router_tuple)
+        return (x, router_tuple)
+
+
+# class DenseTransformerLayer(nn.Module):
+#     """
+#     Dense transformer layer.
+
+#     Parameters:
+#     -----------
+#     config : PretrainedConfig
+#         Model configuration class with all the parameters of the model.
+
+#     """
+
+#     def __init__(self, config: PretrainedConfig):
+#         super().__init__()
+#         self.config = config
+
+#         # embeddings
+#         if config.position_embedding_type == "rotary":
+#             self.rotary_embeddings = RotaryPositionalEmbedding(config.hidden_size)
+
+#         # norm
+#         self.norm1 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+#         self.norm2 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+
+#         # attention
+#         # NOTE: if config.output_attentions is True, torch can't use optimized SDPA
+#         # see -> https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html
+#         self.attention = nn.MultiheadAttention(
+#             embed_dim=config.hidden_size,
+#             num_heads=config.num_attention_heads,
+#             dropout=config.attention_dropout,
+#             batch_first=True,
+#         )
+
+#         # feedforward
+#         # factor = 2 if config.expert_activation == "swiglu" else 1
+#         # self.activation = get_activation_fn(config.activation)
+#         # self.feed_forward = nn.Sequential(
+#         #     nn.Linear(config.hidden_size, config.intermediate_size * factor),
+#         #     self.activation,
+#         #     nn.Dropout(config.hidden_dropout),
+#         #     nn.Linear(config.intermediate_size, config.hidden_size),
+#         # )
+#         factor = 2 if config.activation.lower() == "swiglu" else 1
+#         self.ffn_in = nn.Linear(config.hidden_size, config.intermediate_size * factor)
+#         self.ffn_out = nn.Linear(config.intermediate_size, config.hidden_size)
+#         self.ffn_activation = get_activation_fn(config.activation)
+
+#         # dropout
+#         self.dropout = nn.Dropout(config.dropout)
+
+#     def forward(
+#         self,
+#         x: torch.Tensor,
+#         attention_mask: Optional[torch.Tensor] = None,
+#         need_weights: bool = False,
+#     ):
+#         """
+#         Process the input hidden states.
+
+#         Parameters:
+#         -----------
+#         x : torch.Tensor
+#             Input tensor of shape (batch_size, sequence_length, hidden_size).
+
+#         attention_mask : torch.Tensor, optional
+#             Attention mask of shape (batch_size, sequence_length). The default is None.
+
+#         need_weights : bool, optional
+#             Whether to return the attention weights. The default is False.
+
+#         Returns:
+#         --------
+#         output : Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
+#             If ``config.output_attentions`` is ``True``, the output will be a tuple of
+#             (x, attn). Otherwise, the output will be just x.
+
+#             x : torch.Tensor
+#                 Output tensor of shape (batch_size, sequence_length, hidden_size).
+#             attn : torch.Tensor
+#                 Attention weights of shape (batch_size, num_heads, sequence_length, sequence_length).
+
+#         """
+
+#         # invert attention mask and convert to boolean, since the 🤗 DataCollatorForLanguageModeling
+#         # uses 0 for padding tokens and 1 for other tokens, but we want True for padding tokens and
+#         # False for other tokens
+#         if attention_mask is not None:
+#             attention_mask = 1 - attention_mask
+#             attention_mask = attention_mask.bool()
+
+#         # pre-norm
+#         residual = x
+#         if self.config.pre_norm:
+#             x = self.norm1(x)
+
+#         # positional embeddings
+#         if self.config.position_embedding_type == "rotary":
+#             k = self.rotary_embeddings(x)
+#             q = self.rotary_embeddings(x)
+#             v = x
+#         else:
+#             k, q, v = x, x, x
+
+#         # attention
+#         x = self.attention(
+#             k,
+#             q,
+#             v,
+#             key_padding_mask=attention_mask,
+#             need_weights=need_weights,
+#         )
+#         if need_weights:
+#             x, attn = x
+#         else:
+#             x = x[0]
+#         x = residual + self.dropout(x)
+
+#         # post-norm
+#         if not self.config.pre_norm:
+#             x = self.norm1(x)
+
+#         # pre-norm
+#         residual = x
+#         if self.config.pre_norm:
+#             x = self.norm2(x)
+
+#         # feedforward
+#         # x = self.feed_forward(x)
+#         x = self.ffn_in(x)
+#         x = self.ffn_activation(x)
+#         x = self.dropout(x)
+#         x = self.ffn_out(x)
+#         x = residual + x
+
+#         # post-norm
+#         if not self.config.pre_norm:
+#             x = self.norm2(x)
+
+#         # outputs
+#         if need_weights:
+#             return x, attn
+#         return x
 
 
 # class DenseTransformerLayer(nn.Module):
@@ -898,152 +1617,152 @@ class DenseTransformerLayer(nn.Module):
 #         return x
 
 
-class SparseTransformerLayer(nn.Module):
-    """
-    Sparse transformer layer.
+# class SparseTransformerLayer(nn.Module):
+#     """
+#     Sparse transformer layer.
 
-    Parameters:
-    -----------
-    config : PretrainedConfig
-        Model configuration class with all the parameters of the model.
+#     Parameters:
+#     -----------
+#     config : PretrainedConfig
+#         Model configuration class with all the parameters of the model.
 
-    """
+#     """
 
-    def __init__(
-        self,
-        config: PretrainedConfig,
-    ):
-        super().__init__()
-        self.config = config
+#     def __init__(
+#         self,
+#         config: PretrainedConfig,
+#     ):
+#         super().__init__()
+#         self.config = config
 
-        # embeddings
-        if config.position_embedding_type == "rotary":
-            self.rotary_embeddings = RotaryPositionalEmbedding(config.hidden_size)
+#         # embeddings
+#         if config.position_embedding_type == "rotary":
+#             self.rotary_embeddings = RotaryPositionalEmbedding(config.hidden_size)
 
-        # norm
-        self.norm1 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.norm2 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+#         # norm
+#         self.norm1 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+#         self.norm2 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
-        # attention
-        # NOTE: if config.output_attentions is True, torch can't use optimized SDPA
-        # see -> https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html
-        self.attention = nn.MultiheadAttention(
-            embed_dim=config.hidden_size,
-            num_heads=config.num_attention_heads,
-            dropout=config.attention_dropout,
-            batch_first=True,
-        )
+#         # attention
+#         # NOTE: if config.output_attentions is True, torch can't use optimized SDPA
+#         # see -> https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html
+#         self.attention = nn.MultiheadAttention(
+#             embed_dim=config.hidden_size,
+#             num_heads=config.num_attention_heads,
+#             dropout=config.attention_dropout,
+#             batch_first=True,
+#         )
 
-        # sparse feedforward
-        self.mlp = SparseMLP(config)
+#         # sparse feedforward
+#         self.mlp = SparseMLP(config)
 
-        # dropout
-        self.dropout = nn.Dropout(config.dropout)
+#         # dropout
+#         self.dropout = nn.Dropout(config.dropout)
 
-    def forward(
-        self,
-        x: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        need_weights: bool = False,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, Tuple]]:
-        """
-        Process the input hidden states.
+#     def forward(
+#         self,
+#         x: torch.Tensor,
+#         attention_mask: Optional[torch.Tensor] = None,
+#         need_weights: bool = False,
+#     ) -> Union[torch.Tensor, Tuple[torch.Tensor, Tuple]]:
+#         """
+#         Process the input hidden states.
 
-        Parameters:
-        -----------
-        x : torch.Tensor
-            Input tensor of shape (batch_size, sequence_length, hidden_size).
+#         Parameters:
+#         -----------
+#         x : torch.Tensor
+#             Input tensor of shape (batch_size, sequence_length, hidden_size).
 
-        attention_mask : torch.Tensor, optional
-            Attention mask of shape (batch_size, sequence_length). The default is None.
+#         attention_mask : torch.Tensor, optional
+#             Attention mask of shape (batch_size, sequence_length). The default is None.
 
-        need_weights : bool, optional
-            Whether to return the attention weights. The default is False.
+#         need_weights : bool, optional
+#             Whether to return the attention weights. The default is False.
 
-        Returns:
-        --------
-        output : Tuple[torch.Tensor, Tuple]
+#         Returns:
+#         --------
+#         output : Tuple[torch.Tensor, Tuple]
 
-            If ``config.output_attentions`` is ``True``, output is a tuple of (x, attn, router_tuple).
-            Otherwise, output is a tuple of (x, router_tuple).
+#             If ``config.output_attentions`` is ``True``, output is a tuple of (x, attn, router_tuple).
+#             Otherwise, output is a tuple of (x, router_tuple).
 
-            x: torch.Tensor
-                Output tensor of shape (batch_size, sequence_length, hidden_size).
-            attn: torch.Tensor
-                Attention weights of shape (batch_size, num_heads, sequence_length, sequence_length).
-            router_tuple: Tuple
-                Tuple of router logits and expert mask. Both are of shape
-                (batch_size, sequence_length, num_experts).
+#             x: torch.Tensor
+#                 Output tensor of shape (batch_size, sequence_length, hidden_size).
+#             attn: torch.Tensor
+#                 Attention weights of shape (batch_size, num_heads, sequence_length, sequence_length).
+#             router_tuple: Tuple
+#                 Tuple of router logits and expert mask. Both are of shape
+#                 (batch_size, sequence_length, num_experts).
 
-        """
-        # invert attention mask and convert to boolean, since the 🤗 DataCollatorForLanguageModeling
-        # uses 0 for padding tokens and 1 for other tokens, but we want True for padding tokens and
-        # False for other tokens
-        if attention_mask is not None:
-            attention_mask = 1 - attention_mask
-            attention_mask = attention_mask.bool()
+#         """
+#         # invert attention mask and convert to boolean, since the 🤗 DataCollatorForLanguageModeling
+#         # uses 0 for padding tokens and 1 for other tokens, but we want True for padding tokens and
+#         # False for other tokens
+#         if attention_mask is not None:
+#             attention_mask = 1 - attention_mask
+#             attention_mask = attention_mask.bool()
 
-        # pre-norm
-        residual = x
-        if self.config.pre_norm:
-            x = self.norm1(x)
+#         # pre-norm
+#         residual = x
+#         if self.config.pre_norm:
+#             x = self.norm1(x)
 
-        # # positional embeddings
-        # x = self.embedding_dropout(self.positional_embeddings(x))
+#         # # positional embeddings
+#         # x = self.embedding_dropout(self.positional_embeddings(x))
 
-        # # attention
-        # x = self.self_attn(
-        #     x,
-        #     x,
-        #     x,
-        #     key_padding_mask=attention_mask,
-        #     need_weights=self.config.output_attentions,
-        # )
+#         # # attention
+#         # x = self.self_attn(
+#         #     x,
+#         #     x,
+#         #     x,
+#         #     key_padding_mask=attention_mask,
+#         #     need_weights=self.config.output_attentions,
+#         # )
 
-        # positional embeddings
-        if self.config.position_embedding_type == "rotary":
-            k = self.rotary_embeddings(x)
-            q = self.rotary_embeddings(x)
-            v = x
-        else:
-            k, q, v = x, x, x
+#         # positional embeddings
+#         if self.config.position_embedding_type == "rotary":
+#             k = self.rotary_embeddings(x)
+#             q = self.rotary_embeddings(x)
+#             v = x
+#         else:
+#             k, q, v = x, x, x
 
-        # attention
-        x = self.attention(
-            k,
-            q,
-            v,
-            key_padding_mask=attention_mask,
-            need_weights=need_weights,
-        )
+#         # attention
+#         x = self.attention(
+#             k,
+#             q,
+#             v,
+#             key_padding_mask=attention_mask,
+#             need_weights=need_weights,
+#         )
 
-        if need_weights:
-            x, attn = x
-        else:
-            x = x[0]
-        x = residual + self.dropout(x)
+#         if need_weights:
+#             x, attn = x
+#         else:
+#             x = x[0]
+#         x = residual + self.dropout(x)
 
-        # post-norm
-        if not self.config.pre_norm:
-            x = self.norm1(x)
+#         # post-norm
+#         if not self.config.pre_norm:
+#             x = self.norm1(x)
 
-        # pre-norm
-        residual = x
-        if self.config.pre_norm:
-            x = self.norm2(x)
+#         # pre-norm
+#         residual = x
+#         if self.config.pre_norm:
+#             x = self.norm2(x)
 
-        # feedforward
-        x, router_tuple = self.mlp(x)
-        x = residual + self.dropout(x)
+#         # feedforward
+#         x, router_tuple = self.mlp(x)
+#         x = residual + self.dropout(x)
 
-        # post-norm
-        if not self.config.pre_norm:
-            x = self.norm2(residual + x)
+#         # post-norm
+#         if not self.config.pre_norm:
+#             x = self.norm2(residual + x)
 
-        # outputs
-        if need_weights:
-            return (x, attn, router_tuple)
-        return (x, router_tuple)
+#         # outputs
+#         if need_weights:
+#             return (x, attn, router_tuple)
+#         return (x, router_tuple)
 
 
 # class SparseTransformerLayer(nn.Module):
@@ -1295,7 +2014,7 @@ class HybridSparseTransformerLayer(nn.Module):
 
         # sparse residual connection
         self.residual_norm = nn.LayerNorm(embed_dim, eps=layer_norm_eps)
-        self.sparse_residual = SparseMLP(
+        self.sparse_residual = SparseFFN(
             embed_dim=embed_dim,
             ffn_dim=residual_ffn_dim,
             num_experts=num_experts,
@@ -1309,7 +2028,7 @@ class HybridSparseTransformerLayer(nn.Module):
             router_bias=router_bias,
             router_jitter=router_jitter,
             router_ignore_padding_tokens=router_ignore_padding_tokens,
-            router_class=ExpertChoiceRouter if expert_choice_router else TopKRouter,
+            router_class=TopKRouter,
             expert_class=Expert,
         )
 
@@ -1960,118 +2679,118 @@ class HybridSparseTransformerLayer(nn.Module):
 #         return x
 
 
-class SparseRoformerLayer(nn.Module):
-    """
-    Sparse Roformer layer.
+# class SparseRoformerLayer(nn.Module):
+#     """
+#     Sparse Roformer layer.
 
 
-    """
+#     """
 
-    def __init__(
-        self,
-        embed_dim: int,
-        ffn_dim: int,
-        num_heads: int,
-        num_experts: int,
-        max_len: int,
-        expert_capacity: int,
-        num_shared_experts: int = 0,
-        top_k: int = 1,
-        expert_activation: str = "gelu",
-        dropout: float = 0.1,
-        attention_dropout: float = 0.0,
-        expert_ffn_dropout: float = 0.0,
-        token_embedding_dropout: float = 0.0,
-        layer_norm_eps: float = 1e-5,
-        router_dtype: str = "float32",
-        router_bias: bool = False,
-        router_jitter: float = 0.0,
-        router_ignore_padding_tokens: bool = True,
-        router_class: nn.Module = TopKRouter,
-        expert_class: nn.Module = Expert,
-    ):
-        super().__init__()
-        self.rotary_embedding = RotaryPositionalEmbedding(embed_dim, max_len)
+#     def __init__(
+#         self,
+#         embed_dim: int,
+#         ffn_dim: int,
+#         num_heads: int,
+#         num_experts: int,
+#         max_len: int,
+#         expert_capacity: int,
+#         num_shared_experts: int = 0,
+#         top_k: int = 1,
+#         expert_activation: str = "gelu",
+#         dropout: float = 0.1,
+#         attention_dropout: float = 0.0,
+#         expert_ffn_dropout: float = 0.0,
+#         token_embedding_dropout: float = 0.0,
+#         layer_norm_eps: float = 1e-5,
+#         router_dtype: str = "float32",
+#         router_bias: bool = False,
+#         router_jitter: float = 0.0,
+#         router_ignore_padding_tokens: bool = True,
+#         router_class: nn.Module = TopKRouter,
+#         expert_class: nn.Module = Expert,
+#     ):
+#         super().__init__()
+#         self.rotary_embedding = RotaryPositionalEmbedding(embed_dim, max_len)
 
-        self.norm1 = nn.LayerNorm(embed_dim)
-        self.norm2 = nn.LayerNorm(embed_dim)
-        self.attention = nn.MultiheadAttention(
-            embed_dim=embed_dim,
-            num_heads=num_heads,
-            dropout=attention_dropout,
-            batch_first=True,
-        )
+#         self.norm1 = nn.LayerNorm(embed_dim)
+#         self.norm2 = nn.LayerNorm(embed_dim)
+#         self.attention = nn.MultiheadAttention(
+#             embed_dim=embed_dim,
+#             num_heads=num_heads,
+#             dropout=attention_dropout,
+#             batch_first=True,
+#         )
 
-        self.mlp = SparseMLP(
-            embed_dim=embed_dim,
-            ffn_dim=ffn_dim,
-            num_experts=num_experts,
-            num_shared_experts=num_shared_experts,
-            expert_capacity=expert_capacity,
-            top_k=top_k,
-            expert_activation=expert_activation,
-            expert_ffn_dropout=expert_ffn_dropout,
-            router_dtype=router_dtype,
-            router_bias=router_bias,
-            router_jitter=router_jitter,
-            router_ignore_padding_tokens=router_ignore_padding_tokens,
-            router_class=router_class,
-            expert_class=expert_class,
-        )
-        self.dropout = nn.Dropout(dropout)
-        self.token_embedding_dropout = nn.Dropout(token_embedding_dropout)
+#         self.mlp = SparseMLP(
+#             embed_dim=embed_dim,
+#             ffn_dim=ffn_dim,
+#             num_experts=num_experts,
+#             num_shared_experts=num_shared_experts,
+#             expert_capacity=expert_capacity,
+#             top_k=top_k,
+#             expert_activation=expert_activation,
+#             expert_ffn_dropout=expert_ffn_dropout,
+#             router_dtype=router_dtype,
+#             router_bias=router_bias,
+#             router_jitter=router_jitter,
+#             router_ignore_padding_tokens=router_ignore_padding_tokens,
+#             router_class=router_class,
+#             expert_class=expert_class,
+#         )
+#         self.dropout = nn.Dropout(dropout)
+#         self.token_embedding_dropout = nn.Dropout(token_embedding_dropout)
 
-        self.norm1 = nn.LayerNorm(embed_dim, eps=layer_norm_eps)
-        self.norm2 = nn.LayerNorm(embed_dim, eps=layer_norm_eps)
+#         self.norm1 = nn.LayerNorm(embed_dim, eps=layer_norm_eps)
+#         self.norm2 = nn.LayerNorm(embed_dim, eps=layer_norm_eps)
 
-    def forward(
-        self,
-        query: torch.Tensor,
-        key: torch.Tensor,
-        value: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        key_padding_mask: Optional[torch.Tensor] = None,
-        need_weights: bool = False,
-        output_router_logits: bool = True,
-    ):
-        # pre-norm
-        query_norm = self.token_embedding_dropout(self.norm1(query))
-        key_norm = self.token_embedding_dropout(self.norm1(key))
-        value_norm = self.token_embedding_dropout(self.norm1(value))
+#     def forward(
+#         self,
+#         query: torch.Tensor,
+#         key: torch.Tensor,
+#         value: torch.Tensor,
+#         attention_mask: Optional[torch.Tensor] = None,
+#         key_padding_mask: Optional[torch.Tensor] = None,
+#         need_weights: bool = False,
+#         output_router_logits: bool = True,
+#     ):
+#         # pre-norm
+#         query_norm = self.token_embedding_dropout(self.norm1(query))
+#         key_norm = self.token_embedding_dropout(self.norm1(key))
+#         value_norm = self.token_embedding_dropout(self.norm1(value))
 
-        # rotary embeddings
-        query_rot = self.rotary_embedding(query_norm)
-        key_rot = self.rotary_embedding(key_norm)
-        value_rot = self.rotary_embedding(value_norm)
+#         # rotary embeddings
+#         query_rot = self.rotary_embedding(query_norm)
+#         key_rot = self.rotary_embedding(key_norm)
+#         value_rot = self.rotary_embedding(value_norm)
 
-        # attention
-        x = self.attention(
-            query_rot,
-            key_rot,
-            value_rot,
-            attn_mask=attention_mask,
-            key_padding_mask=key_padding_mask,
-            need_weights=need_weights,
-        )
-        # x = query + self.dropout(x)
-        if need_weights:
-            x, attn = x
-        else:
-            x = x[0]
-        x = query + self.dropout(x)
+#         # attention
+#         x = self.attention(
+#             query_rot,
+#             key_rot,
+#             value_rot,
+#             attn_mask=attention_mask,
+#             key_padding_mask=key_padding_mask,
+#             need_weights=need_weights,
+#         )
+#         # x = query + self.dropout(x)
+#         if need_weights:
+#             x, attn = x
+#         else:
+#             x = x[0]
+#         x = query + self.dropout(x)
 
-        # pre-norm
-        residual = x
-        x = self.norm2(x)
+#         # pre-norm
+#         residual = x
+#         x = self.norm2(x)
 
-        # sparse feedforward
-        x, router_tuple = self.mlp(x)
-        x = residual + self.dropout(x)
+#         # sparse feedforward
+#         x, router_tuple = self.mlp(x)
+#         x = residual + self.dropout(x)
 
-        if output_router_logits and router_tuple is not None:
-            if need_weights:
-                return (x, attn, router_tuple)
-            return (x, router_tuple)
-        if need_weights:
-            return (x, attn)
-        return x
+#         if output_router_logits and router_tuple is not None:
+#             if need_weights:
+#                 return (x, attn, router_tuple)
+#             return (x, router_tuple)
+#         if need_weights:
+#             return (x, attn)
+#         return x
