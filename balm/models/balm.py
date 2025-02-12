@@ -338,7 +338,7 @@ class BalmForMaskedLM(BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountM
         self.lm_head = BalmLMHead(
             hidden_size=self.config.hidden_size,
             output_dim=self.config.vocab_size,
-            activation=self.config.classifier_activation,
+            activation=self.config.mlm_activation,
         )
 
         # loss function

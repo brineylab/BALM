@@ -135,6 +135,9 @@ class BalmLMHead(nn.Module):
     output_dim : int
         Output dimension.
 
+    activation : str, optional
+        Activation function to use. The default is "gelu".
+
     """
 
     def __init__(self, hidden_size: int, output_dim: int, activation: str = "gelu"):

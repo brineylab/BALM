@@ -132,6 +132,7 @@ class BalmConfig(PretrainedConfig):
         pad_token_id: int = 1,
         type_vocab_size: int = 2,
         # classification
+        mlm_activation: str = "gelu",
         classifier_activation: str = "tanh",
         num_labels: int = 2,  # sequence/token-level classification
         num_choices: int = 4,  # multiple choice classification
@@ -173,6 +174,7 @@ class BalmConfig(PretrainedConfig):
         self.num_labels = int(num_labels)
         self.num_choices = int(num_choices)
         self.classifier_activation = classifier_activation.lower()
+        self.mlm_activation = mlm_activation.lower()
 
         # outputs
         self.return_dict = bool(return_dict)

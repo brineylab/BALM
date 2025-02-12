@@ -185,6 +185,7 @@ class BalmMoEConfig(PretrainedConfig):
         router_aux_loss_coef: float = 0.01,  # coefficient for aux loss (load balancing, top-k only)
         router_z_loss_coef: float = 0.001,  # coefficient for z-loss
         # classification
+        mlm_activation: str = "gelu",
         classifier_activation: str = "tanh",
         num_labels: int = 2,  # sequence/token-level classification
         num_choices: int = 4,  # multiple choice classification
@@ -228,6 +229,7 @@ class BalmMoEConfig(PretrainedConfig):
         self.num_labels = int(num_labels)
         self.num_choices = int(num_choices)
         self.classifier_activation = classifier_activation.lower()
+        self.mlm_activation = mlm_activation.lower()
 
         # outputs
         self.return_dict = bool(return_dict)
