@@ -62,8 +62,8 @@ class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
         # final layer norm
         self.final_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
-        # init weights
-        self.init_weights()
+        # # init weights
+        # self.init_weights()
 
     def forward(
         self,
