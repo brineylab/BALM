@@ -25,15 +25,8 @@ def get_activation_fn(
         "swiglu", "geglu", or "reglu". If a module, it must be a subclass of `torch.nn.Module`,
         and the module will be returned as is.
 
-    model_dim: int | None
-        The dimension of the input tensor. Used only for SwiGLU activation.
-        If provided, the input tensor will be separately processed by two linear layers.
-        If not provided, the input tensor will be chunked into two tensors, and the resulting two tensors
-        will be used to compute the SwiGLU activation (with the return tensor being half the size of the input tensor).
-
-    ffn_dim: int | None
-        The dimension of the Ffeed-forward network. Used only for SwiGLU activation. If not provided,
-        the FFN dimension will be set to 4x the model_dim.
+    .. warning::
+        SwiGLU will return a tensor with half the dimension of the input tensor.
 
     Returns
     -------
@@ -57,7 +50,7 @@ def get_activation_fn(
         elif activation == "glu":
             return nn.GLU()
         elif activation == "swiglu":
-            return SwiGLU(dim=dim)
+            return SwiGLU()
         elif activation == "geglu":
             return GeGLU()
         elif activation == "reglu":
@@ -110,23 +103,12 @@ class SwiGLU(nn.Module):
 
     """
 
-    def __init__(self, dim: int | None = None):
+    def __init__(self):
         super().__init__()
-        if dim is not None:
-            self.gate_linear = nn.Linear(dim, dim)
-            self.value_linear = nn.Linear(dim, dim)
-            self.chunked_version = False
-        else:
-            self.chunked_version = True
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.chunked_version:
-            value, gate = x.chunk(2, dim=-1)
-            return value + F.silu(gate)
-        else:
-            gate = self.gate_linear(x)
-            value = self.value_linear(x)
-            return value * F.silu(gate)
+        value, gate = x.chunk(2, dim=-1)
+        return value + F.silu(gate)
 
 
 class GeGLU(nn.Module):
