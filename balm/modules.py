@@ -1314,6 +1314,7 @@ class SparseTransformerLayer(nn.Module):
         num_experts: int,
         max_capacity: Union[int, float],
         k: int = 1,
+        router_type: str = "topk",
         activation: str = "swiglu",
         bias: bool = True,
         dropout: float = 0.1,
@@ -1339,6 +1340,7 @@ class SparseTransformerLayer(nn.Module):
             num_experts=num_experts,
             max_capacity=max_capacity,
             k=k,
+            router_type=router_type,
             activation=activation,
             bias=bias,
         )
