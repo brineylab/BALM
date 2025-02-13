@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import PretrainedConfig
 
-__all__ = ["TopKRouter"]
+__all__ = ["TopKRouter", "ExpertChoiceRouter"]
 
 
 class TopKRouter(nn.Module):
@@ -37,6 +37,35 @@ class TopKRouter(nn.Module):
         logits = self.linear(x)  # (num_tokens, num_experts)
         probs = F.softmax(logits, dim=-1)
         top_k_probs, top_k_indices = torch.topk(probs, k=k, dim=-1)
+        return logits, top_k_probs, top_k_indices
+
+
+class ExpertChoiceRouter(nn.Module):
+    """Expert choice routing module.
+
+    Args:
+        d_model: Token embedding dimension
+        num_experts: Number of available experts
+
+    Input shape: (num_tokens, d_model)
+    Outputs:
+        logits: (num_tokens, num_experts) routing scores
+        probs: (num_experts, expert_capacity) expert-selected token probabilities
+        indices: (num_experts, expert_capacity) selected token indices
+    """
+
+    def __init__(self, d_model: int, num_experts: int):
+        super().__init__()
+        self.linear = nn.Linear(d_model, num_experts)
+
+    def forward(
+        self, x: torch.Tensor, expert_capacity: int
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        logits = self.linear(x)  # (num_tokens, num_experts)
+        probs = F.softmax(logits, dim=0)  # softmax over tokens
+        top_k_probs, top_k_indices = torch.topk(
+            probs, k=expert_capacity, dim=0
+        )  # top-k over tokens
         return logits, top_k_probs, top_k_indices
 
 
