@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 
+from functools import partial
 from typing import Optional, Tuple, Union
 
 import torch
@@ -12,7 +13,7 @@ from transformers import PretrainedConfig
 
 from .activation import get_activation_fn
 from .embedding import RelativePositionalEmbedding, RotaryPositionalEmbedding
-from .router import TopKRouter
+from .router import ExpertChoiceRouter, TopKRouter
 
 __all__ = [
     # layers
@@ -589,6 +590,9 @@ class SparseFFN(nn.Module):
     k: int, default=1
         Number of experts per token.
 
+    router_type: str, default="topk"
+        Router type. Options are "topk" or "expert choice".
+
     Input shape: (batch_size, seq_len, model_dim)
     Output shape: (batch_size, seq_len, model_dim)
 
@@ -601,28 +605,40 @@ class SparseFFN(nn.Module):
         num_experts: int,
         max_capacity: Union[int, float] = 1.0,
         k: int = 1,
+        router_type: str = "topk",
         activation: str = "swiglu",
         bias: bool = True,
         dropout: float = 0.0,
     ):
         super().__init__()
         # router
-        self.router = TopKRouter(model_dim, num_experts)
+        self.router_type = router_type
+        if router_type == "topk":
+            self.router = TopKRouter(model_dim, num_experts)
+        elif router_type == "expert choice":
+            self.router = ExpertChoiceRouter(model_dim, num_experts)
+        else:
+            raise ValueError(f"Invalid router type: {router_type}")
 
         # experts
-        expert_class = SwigluFFN if activation.lower() == "swiglu" else DenseFFN
-        self.experts = nn.ModuleList(
-            [
-                expert_class(
-                    model_dim=model_dim,
-                    ffn_dim=ffn_dim,
-                    activation=activation,
-                    bias=bias,
-                    dropout=dropout,
-                )
-                for _ in range(num_experts)
-            ]
-        )
+        if activation.lower() == "swiglu":
+            expert = partial(
+                SwigluFFN,
+                model_dim=model_dim,
+                ffn_dim=ffn_dim,
+                bias=bias,
+                dropout=dropout,
+            )
+        else:
+            expert = partial(
+                DenseFFN,
+                model_dim=model_dim,
+                ffn_dim=ffn_dim,
+                bias=bias,
+                dropout=dropout,
+                activation=activation,
+            )
+        self.experts = nn.ModuleList([expert() for _ in range(num_experts)])
         self.num_experts = num_experts
         self.k = k
 
@@ -666,6 +682,12 @@ class SparseFFN(nn.Module):
         --------
         x : torch.Tensor
             Output tensor of shape (batch_size, seq_len, model_dim).
+        router_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+            A tuple containing the following:
+            - router_logits: torch.Tensor
+                Router logits of shape (batch_size, seq_len, num_experts).
+            - router_indices: torch.Tensor
+                Router indices of shape (batch_size, seq_len, num_experts).
 
         """
         batch_size, seq_len, d_model = x.shape
@@ -673,12 +695,13 @@ class SparseFFN(nn.Module):
         x_flat = x.view(-1, d_model)  # (num_tokens, d_model)
 
         # get routing information
-        logits, probs, indices = self.router(x_flat, self.k)
         capacity = self._compute_capacity(num_tokens)
+        k = self.k if self.router_type == "topk" else capacity
+        logits, probs, indices = self.router(x_flat, k)
 
         output = torch.zeros_like(x_flat)
         for expert_idx, expert in enumerate(self.experts):
-            # find tokens that selected this expert in their top-k
+            # find tokens that should be routed to this expert
             mask = (indices == expert_idx).any(dim=1)
             if not mask.any():
                 continue
@@ -688,7 +711,7 @@ class SparseFFN(nn.Module):
             # sort by descending expert affinity
             sorted_scores, score_order = torch.sort(expert_scores, descending=True)
             sorted_candidates = candidate_indices[score_order]
-            # apply capacity constraint
+            # apply capacity constraint (does nothing for expert choice router)
             if sorted_candidates.numel() > capacity:
                 sorted_candidates = sorted_candidates[:capacity]
             if sorted_candidates.numel() == 0:
