@@ -358,6 +358,7 @@ class SwigluFFN(nn.Module):
         ffn_dim: int = None,
         bias: bool = True,
         dropout: float = 0.0,
+        activation: str = "swiglu",  # unused, only here for signature compatibility with DenseFFN
     ):
         super().__init__()
         self.gate_linear = nn.Linear(model_dim, ffn_dim, bias=bias)
