@@ -201,6 +201,7 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         all_self_attentions = () if output_attentions else None
         all_hidden_states = () if output_hidden_states else None
         router_logits = ()
+        router_probs = ()
         expert_idxs = ()
 
         if input_ids is not None and inputs_embeds is not None:
@@ -244,7 +245,8 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
                 else:
                     x, router_tuple = x
                 router_logits += (router_tuple[0],)
-                expert_idxs += (router_tuple[1],)
+                router_probs += (router_tuple[1],)
+                expert_idxs += (router_tuple[3],)
             else:
                 # dense layer, no router info
                 x = layer(
@@ -264,14 +266,17 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
             all_hidden_states += (x,)
 
         # router losses
-        cat_router_logits = torch.cat(router_logits, dim=1)
-        cat_expert_indexes = torch.cat(expert_idxs, dim=1)
-        router_probs = nn.Softmax(dim=-1)(cat_router_logits)
+        cat_router_logits = torch.cat(router_logits, dim=0)
+        cat_router_probs = torch.cat(router_probs, dim=0)
+        cat_expert_indexes = torch.cat(expert_idxs, dim=0)
         z_loss = router_z_loss(cat_router_logits)
         if self.config.router_type == "expert choice":
             aux_loss = None
         else:
-            aux_loss = router_load_balancing_loss(router_probs, cat_expert_indexes)
+            aux_loss = router_load_balancing_loss(
+                cat_router_probs,
+                cat_expert_indexes,
+            )
 
         # outputs
         if not return_dict:
