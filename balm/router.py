@@ -1,4 +1,4 @@
-# Copyright (c) 2024 brineylab @ scripps
+# Copyright (c) 2025 brineylab @ scripps
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
@@ -13,45 +13,304 @@ from transformers import PretrainedConfig
 __all__ = ["TopKRouter", "ExpertChoiceRouter"]
 
 
-class TopKRouter(nn.Module):
-    """Learned token-to-expert routing module with top-k selection.
+# class TopKRouter(nn.Module):
+#     """Learned token-to-expert routing module with top-k selection.
 
-    Args:
-        d_model: Token embedding dimension
-        num_experts: Number of available experts
+#     Args:
+#         d_model: Token embedding dimension
+#         num_experts: Number of available experts
+
+#     Input shape: (num_tokens, d_model)
+#     Outputs:
+#         logits: (num_tokens, num_experts) routing scores
+#         probs: (num_tokens, k) top-k routing probabilities
+#         indices: (num_tokens, k) selected expert indices
+#     """
+
+#     def __init__(self, d_model: int, num_experts: int):
+#         super().__init__()
+#         self.linear = nn.Linear(d_model, num_experts)
+
+#     def forward(
+#         self, x: torch.Tensor, k: int
+#     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+#         logits = self.linear(x)  # (num_tokens, num_experts)
+#         probs = F.softmax(logits, dim=-1)
+#         top_k_probs, top_k_indices = torch.topk(probs, k=k, dim=-1)
+#         return logits, top_k_probs, top_k_indices
+
+
+# this one returns probs and indices as shape (num_experts, expert_capacity)
+# which makes it compatible with the expert choice router
+# class TopKRouter(nn.Module):
+#     """Learned token-to-expert routing module with top-k selection and capacity filtering.
+#     Args:
+#         d_model: Token embedding dimension
+#         num_experts: Number of available experts
+#     Input shape: (num_tokens, d_model)
+#     Outputs:
+#         logits: (num_tokens, num_experts) routing scores
+#         probs: (num_experts, expert_capacity) routing probabilities for selected tokens
+#         indices: (num_experts, expert_capacity) indices of selected tokens
+#     """
+
+#     def __init__(self, d_model: int, num_experts: int):
+#         super().__init__()
+#         self.linear = nn.Linear(d_model, num_experts)
+
+#     def forward(
+#         self, x: torch.Tensor, k: int, expert_capacity: int
+#     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+#         logits = self.linear(x)  # (num_tokens, num_experts)
+#         probs = F.softmax(logits, dim=-1)  # (num_tokens, num_experts)
+#         num_tokens = x.size(0)
+#         num_experts = self.linear.out_features
+
+#         expert_probs = torch.zeros(
+#             (num_experts, expert_capacity), dtype=probs.dtype, device=probs.device
+#         )
+#         expert_indices = torch.zeros(
+#             (num_experts, expert_capacity),
+#             dtype=torch.long,
+#             device=indices.device
+#             if (indices := torch.empty(0)).device != torch.device("cpu")
+#             else torch.device("cpu"),
+#         )
+
+#         for expert_idx in range(num_experts):
+#             expert_logits = logits[:, expert_idx]  # (num_tokens,)
+#             sorted_logits, sorted_token_indices = torch.sort(
+#                 expert_logits, descending=True
+#             )
+#             num_keep = min(
+#                 expert_capacity, num_tokens
+#             )  # handle cases where num_tokens < expert_capacity
+#             if num_keep > 0:
+#                 selected_token_indices = sorted_token_indices[:num_keep]
+#                 selected_probs = probs[selected_token_indices, expert_idx]
+#                 expert_probs[expert_idx, :num_keep] = selected_probs
+#                 expert_indices[expert_idx, :num_keep] = selected_token_indices
+
+#         return logits, expert_probs, expert_indices
+
+
+# class TopKRouter(nn.Module):
+#     """Learned token-to-expert routing module with top-k selection and capacity filtering.
+
+#     Args:
+#         d_model: Token embedding dimension
+#         num_experts: Number of available experts
+
+#     Input shape: (num_tokens, d_model)
+#     Outputs:
+#         logits: (num_tokens, num_experts) routing scores
+#         probs: (num_experts, expert_capacity) routing probabilities for selected tokens
+#         indices: (num_experts, expert_capacity) indices of selected tokens
+#     """
+
+#     def __init__(self, d_model: int, num_experts: int):
+#         super().__init__()
+#         self.linear = nn.Linear(d_model, num_experts)
+
+#     def forward(
+#         self, x: torch.Tensor, k: int, expert_capacity: int
+#     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+#         num_tokens = x.size(0)
+#         num_experts = self.linear.out_features
+
+#         # routing logits and probabilities
+#         logits = self.linear(x)  # ==> (num_tokens, num_experts)
+#         probs = F.softmax(logits, dim=-1)  # ==> (num_tokens, num_experts)
+
+#         # results tensors
+#         expert_probs = torch.zeros(
+#             (num_experts, expert_capacity), dtype=probs.dtype, device=probs.device
+#         )
+#         expert_indices = (
+#             torch.zeros(
+#                 (num_experts, expert_capacity), dtype=torch.long, device=probs.device
+#             )
+#             - 1  # -1 will later be filtered out as "empty slots" in an undersubscribed expert
+#         )
+
+#         # top-k experts selection
+#         token_to_experts = torch.zeros(
+#             (num_tokens, num_experts), dtype=torch.bool, device=probs.device
+#         )
+#         topk_probs, topk_indices = torch.topk(probs, k=min(k, num_experts), dim=1)
+
+#         # map each token's top-k experts
+#         for token_idx in range(num_tokens):
+#             for expert_idx in topk_indices[token_idx]:
+#                 token_to_experts[token_idx, expert_idx] = True
+
+#         # capacity limiting per expert
+#         for expert_idx in range(num_experts):
+#             # get all tokens that selected this expert in their top-k
+#             token_indices = torch.where(token_to_experts[:, expert_idx])[0]
+
+#             if len(token_indices) > 0:
+#                 # get the corresponding probabilities
+#                 token_probs = probs[token_indices, expert_idx]
+
+#                 # sort by probability (high to low)
+#                 sorted_probs, sorted_indices = torch.sort(token_probs, descending=True)
+
+#                 # limit to expert capacity
+#                 num_to_keep = min(expert_capacity, len(sorted_indices))
+
+#                 if num_to_keep > 0:
+#                     # select the tokens with highest probability for this expert
+#                     selected_indices = sorted_indices[:num_to_keep]
+#                     selected_token_indices = token_indices[selected_indices]
+#                     selected_probs = sorted_probs[:num_to_keep]
+
+#                     expert_probs[expert_idx, :num_to_keep] = selected_probs
+#                     expert_indices[expert_idx, :num_to_keep] = selected_token_indices
+
+#         return logits, probs, expert_probs, expert_indices
+
+
+class TopKRouter(nn.Module):
+    """
+    Router that implements the "token choice of top-k experts" strategy. For example, if k=1, this
+    replicates the top-1 routing strategy introduced in the `Switch Transformers`_ paper.
+    Alternatively, if k=2, this replicates the top-2 routing strategy introduced in the `GShard`_
+    paper. Tokens are routed to their expert of choice until the expert's `expert_capacity` is
+    reached. Shared experts, which process all tokens, are implemented as described in the
+    `DeepSeqMoE`_ paper.
+
+    .. note::
+        There is no guarantee that each token will be processed by an expert,
+        or that every expert will receive at least one token.
+
+    If tokens are routed to an expert which is above capacity, they are not processed by any expert
+    and their hidden states are passed to the subsequent layer unchanged.
+
+    Parameters:
+    -----------
+    d_model: int
+        Token embedding dimension
+    num_experts: int
+        Number of available experts
 
     Input shape: (num_tokens, d_model)
-    Outputs:
-        logits: (num_tokens, num_experts) routing scores
-        probs: (num_tokens, k) top-k routing probabilities
-        indices: (num_tokens, k) selected expert indices
+
+    Returns:
+    --------
+    logits: (num_tokens, num_experts) routing scores
+    probs: (num_tokens, num_experts) routing probabilities
+    expert_probs: (num_experts, expert_capacity) expert-selected token probabilities
+    expert_indices: (num_experts, expert_capacity) selected token indices
+
+    .. _Switch Transformers:
+        https://arxiv.org/abs/2101.03961
+
+    .. _GShard:
+        https://arxiv.org/abs/2006.16668
+
+    .. _DeepSeqMoE:
+        https://arxiv.org/abs/2401.06066
     """
 
     def __init__(self, d_model: int, num_experts: int):
         super().__init__()
         self.linear = nn.Linear(d_model, num_experts)
 
-    def forward(
-        self, x: torch.Tensor, k: int
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        logits = self.linear(x)  # (num_tokens, num_experts)
+    def forward(self, x: torch.Tensor, k: int, expert_capacity: int):
+        """
+        x: (num_tokens, d_model)
+        k: how many experts each token chooses
+        expert_capacity: how many tokens each expert keeps
+        """
+        num_tokens = x.size(0)
+        num_experts = self.linear.out_features
+        k = min(k, num_experts)
+
+        # compute routing logits and probs ==> (num_tokens, num_experts)
+        logits = self.linear(x)
         probs = F.softmax(logits, dim=-1)
-        top_k_probs, top_k_indices = torch.topk(probs, k=k, dim=-1)
-        return logits, top_k_probs, top_k_indices
+
+        # select top-k experts for each token ==> (num_tokens, k)
+        topk_probs, topk_expert_ids = torch.topk(probs, k, dim=-1)
+
+        # flatten top-k expert IDs and probs ==> (num_tokens * k)
+        flat_expert_ids = topk_expert_ids.reshape(-1)
+        flat_probs = topk_probs.reshape(-1)
+
+        # we also need the original token ids that correspond to each slot
+        # in flattened form: e.g. 0..(num_tokens-1) repeated k times ==> (num_tokens * k)
+        flat_token_ids = (
+            torch.arange(num_tokens, device=x.device)
+            .unsqueeze(1)
+            .expand(num_tokens, k)
+            .reshape(-1)
+        )
+
+        # for each expert, pick up to 'expert_capacity' tokens
+        # in order of highest expert affiniy
+        expert_probs = torch.zeros(
+            (num_experts, expert_capacity), dtype=probs.dtype, device=probs.device
+        )
+        expert_indices = torch.full(
+            (num_experts, expert_capacity),
+            fill_value=-1,
+            dtype=torch.long,
+            device=probs.device,
+        )
+
+        # loop over experts, grouping slots that picked each expert.
+        for e in range(num_experts):
+            mask = flat_expert_ids == e
+            chosen_token_ids = flat_token_ids[mask]
+            chosen_probs = flat_probs[mask]
+
+            # sort by expert affinity
+            if chosen_token_ids.numel() > 0:
+                sorted_probs, sorted_idx = torch.sort(chosen_probs, descending=True)
+                # take up to `expert_capacity` tokens per expert
+                keep = min(expert_capacity, sorted_probs.size(0))
+                expert_probs[e, :keep] = sorted_probs[:keep]
+                expert_indices[e, :keep] = chosen_token_ids[sorted_idx[:keep]]
+
+        return logits, probs, expert_probs, expert_indices
 
 
 class ExpertChoiceRouter(nn.Module):
-    """Expert choice routing module.
+    """
+    This router uses the "expert choice of top-k tokens" strategy, as originally described
+    in the `Mixture-of-Experts with Expert Choice Routing`_ paper. This automatically
+    balances the number of tokens processed by each expert, and eliminates the
+    need for an auxiliary (load-balancing) router loss.
 
-    Args:
-        d_model: Token embedding dimension
-        num_experts: Number of available experts
+    .. note::
+        There is no guarantee that each token will be processed by an expert. In fact,
+        one of the primary benefits of expert choice routing is thought to be their
+        ability to heterogeneously devote computation to a subset of highly complex/difficult
+        tokens.
+
+    If tokens are not selected by an expert, their hidden states are passed to the
+    subsequent layer unchanged.
+
+    Parameters:
+    -----------
+    d_model: int
+        Token embedding dimension
+    num_experts: int
+        Number of available experts
 
     Input shape: (num_tokens, d_model)
-    Outputs:
-        logits: (num_tokens, num_experts) routing scores
-        probs: (num_experts, expert_capacity) expert-selected token probabilities
-        indices: (num_experts, expert_capacity) selected token indices
+
+    Returns:
+    --------
+    logits: (num_tokens, num_experts) routing scores
+    probs: (num_tokens, num_experts) routing probabilities
+    expert_probs: (num_experts, expert_capacity) expert-selected token probabilities
+    expert_indices: (num_experts, expert_capacity) selected token indices
+
+    .. _Mixture-of-Experts with Expert Choice Routing:
+        https://arxiv.org/abs/2202.09368
+
     """
 
     def __init__(self, d_model: int, num_experts: int):
@@ -59,14 +318,15 @@ class ExpertChoiceRouter(nn.Module):
         self.linear = nn.Linear(d_model, num_experts)
 
     def forward(
-        self, x: torch.Tensor, expert_capacity: int
+        self, x: torch.Tensor, k: int, expert_capacity: int
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         logits = self.linear(x)  # (num_tokens, num_experts)
-        probs = F.softmax(logits, dim=0)  # softmax over tokens
-        top_k_probs, top_k_indices = torch.topk(
-            probs, k=expert_capacity, dim=0
-        )  # top-k over tokens
-        return logits, top_k_probs, top_k_indices
+        probs = F.softmax(logits, dim=0)
+        expert_probs, expert_indices = torch.topk(probs, k=expert_capacity, dim=0)
+        return logits, probs, expert_probs.T, expert_indices.T
+
+
+#
 
 
 # class RouterBase(nn.Module):
