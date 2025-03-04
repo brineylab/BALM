@@ -1,6 +1,13 @@
 abstar
 abutils
 datasets
+evaluate
 numpy
-pandas
+pandas 
+peft
+polars
+safetensors
 transformers
+tokenizers
+torch
+tqdm

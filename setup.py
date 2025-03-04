@@ -1,5 +1,6 @@
 import os
-from setuptools import setup, find_packages
+
+from setuptools import find_packages, setup
 
 # read version
 version_file = os.path.join(os.path.dirname(__file__), "balm", "version.py")
@@ -22,7 +23,7 @@ setup(
     description="BALM: Baseline Antibody Language Model",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/briney/balm",
+    url="https://github.com/brineylab/balm",
     packages=find_packages(),
     install_requires=requirements,
     include_package_data=True,

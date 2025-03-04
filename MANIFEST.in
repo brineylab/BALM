@@ -1,6 +1,12 @@
 include README.md
+include LICENSE
 include requirements*
-include data_processing/*
-include model/*
-include training/*
+include docs/*.txt
+
+include balm/vocab.json
+
+include balm/config/*
+include balm/eval/*
+include balm/model/*
+include balm/train/*
 
