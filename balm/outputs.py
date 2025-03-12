@@ -9,8 +9,14 @@ from typing import Optional, Tuple, Union
 import torch
 from transformers.utils.generic import ModelOutput
 
-__all__ = ["BaseModelOutput", "MaskedLMOutput", "SequenceClassifierOutput"]
-
+__all__ = [
+    "MoEMaskedLMOutput", 
+    "MoEModelOutput", 
+    "MoESequenceClassifierOutput",
+    "BaseModelOutput", 
+    "MaskedLMOutput", 
+    "SequenceClassifierOutput"
+]
 
 @dataclass
 class BalmModelOutput(ModelOutput):
