@@ -1,4 +1,4 @@
-from transformers import Trainer, TrainerCallback
+from transformers import Trainer
 
 class LossLoggingTrainer(Trainer):
     def __init__(self, *args, **kwargs):
@@ -13,15 +13,18 @@ class LossLoggingTrainer(Trainer):
         loss = outputs.loss
 
         # mean losses across batch
-        z_loss = outputs.z_loss.mean()
-        aux_loss = outputs.aux_loss.mean() 
+        loss_manual = loss.mean()
         lm_loss = outputs.lm_loss.mean()
+        z_loss = outputs.z_loss.mean()
+        aux_loss = outputs.aux_loss.mean() if outputs.aux_loss is not None else None
 
         self.state.custom_log_cache = {
-            "z_loss": z_loss.item(),
-            "aux_loss": aux_loss.item(),
+            "loss_manual": loss_manual.item(),
             "lm_loss": lm_loss.item(),
+            "z_loss": z_loss.item(),
         }
+        if aux_loss is not None:
+            self.state.custom_log_cache["aux_loss"] = aux_loss.item()
 
         return (loss, outputs) if return_outputs else loss
     
