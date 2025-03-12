@@ -78,6 +78,7 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
                         ffn_dim=self.config.intermediate_size,
                         num_heads=self.config.num_attention_heads,
                         num_experts=self.config.num_experts,
+                        expert_capacity_type=self.config.expert_capacity_type,
                         max_capacity=self.config.expert_capacity,
                         k=self.config.num_experts_per_tok,
                         router_type=self.config.router_type,

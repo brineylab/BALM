@@ -409,9 +409,13 @@ class SparseFFN(nn.Module):
 
     num_experts: int
         Number of experts.
+    
+    expert_capacity_type : str
+        The type of expert capacity to use. 
+        If "absolute": tokens per expert; if "multiplier": capacity = multiplier * max_position_embeddings
 
-    max_capacity: Union[int, float], default=1.0
-        Expert capacity (int = absolute, float = multiplier).
+    max_capacity: Union[int, float]
+        Expert capacity, either absolute or multiplier based on expert_capacity_type
 
     k: int, default=1
         Number of experts per token.
@@ -428,7 +432,8 @@ class SparseFFN(nn.Module):
         model_dim: int,
         ffn_dim: int,
         num_experts: int,
-        max_capacity: Union[int, float] = 1.0,
+        expert_capacity_type: str,
+        max_capacity: Union[int, float],
         k: int = 1,
         router_type: str = "topk",
         activation: str = "swiglu",
@@ -468,7 +473,7 @@ class SparseFFN(nn.Module):
         self.k = k
 
         # capacity
-        if isinstance(max_capacity, float):
+        if expert_capacity_type == "multiplier":
             self.capacity_multiplier = max_capacity
             self.absolute_capacity = None
         else:
@@ -490,7 +495,7 @@ class SparseFFN(nn.Module):
             Expert capacity.
         """
         if self.capacity_multiplier:
-            return int(self.capacity_multiplier * num_tokens)
+            return int(self.capacity_multiplier * num_tokens / self.num_experts)
         return self.absolute_capacity
 
     def forward(
@@ -809,9 +814,13 @@ class SparseTransformerLayer(nn.Module):
 
     num_experts: int
         Number of experts in SparseFFN.
+    
+    expert_capacity_type : str
+        The type of expert capacity to use. 
+        If "absolute": tokens per expert; if "multiplier": capacity = multiplier * max_position_embeddings
 
     max_capacity: Union[int, float]
-        Expert capacity (int = absolute, float = multiplier).
+        Expert capacity, either absolute or multiplier based on expert_capacity_type
 
     k: int, default=1
         Number of experts per token.
@@ -842,6 +851,7 @@ class SparseTransformerLayer(nn.Module):
         ffn_dim: int,
         num_heads: int,
         num_experts: int,
+        expert_capacity_type: str,
         max_capacity: Union[int, float],
         k: int = 1,
         router_type: str = "topk",
@@ -868,6 +878,7 @@ class SparseTransformerLayer(nn.Module):
             model_dim=model_dim,
             ffn_dim=ffn_dim,
             num_experts=num_experts,
+            expert_capacity_type=expert_capacity_type,
             max_capacity=max_capacity,
             k=k,
             router_type=router_type,

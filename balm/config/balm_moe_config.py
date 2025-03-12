@@ -81,7 +81,7 @@ class BalmMoEConfig(PretrainedConfig):
         The type of expert capacity to use.
         If "absolute": tokens per expert; if "multiplier": capacity = multiplier * max_position_embeddings
 
-    expert_capacity : int, default=2
+    expert_capacity : int, default=1
         The capacity of each expert.
         If `expert_capacity_type` is "absolute", this value is translated as the actual token capacity of each expert.
         If `expert_capacity_type` is "multiplier", this value is translated as the multiplier with which the total
@@ -176,7 +176,7 @@ class BalmMoEConfig(PretrainedConfig):
         router_jitter: float = 0.0,
         router_bias: bool = False,
         expert_capacity_type: str = "multiplier",  # "absolute" or "multiplier"
-        expert_capacity: Union[int, float] = 2,
+        expert_capacity: Union[int, float] = 1,
         expert_activation: str = "gelu",
         expert_bias: bool = True,
         expert_dropout: Optional[float] = None,
