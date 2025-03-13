@@ -8,7 +8,6 @@ import torch
 from torch import nn
 
 __all__ = [
-    # "RelativePositionalEmbedding",
     "RotaryPositionalEmbedding",
 ]
 
@@ -90,55 +89,3 @@ class RotaryPositionalEmbedding(nn.Module):
 
         sin, cos = angles.sin(), angles.cos()
         return apply_rotary_emb(x, sin, cos)
-
-
-# class RelativePositionalEmbedding(nn.Module):
-#     """
-#     Relative positional embeddings, as initially described in the
-#     `T5: Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer`_ paper.
-
-#     Parameters
-#     ----------
-#     num_heads: int
-#         The number of heads.
-
-#     max_position: int
-#         The maximum position.
-
-#     .. _T5: Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer:
-#         https://arxiv.org/abs/1910.10683
-
-#     """
-
-#     def __init__(self, num_heads: int, max_position: int = 512):
-#         super().__init__()
-#         self.num_heads = num_heads
-#         self.max_position = max_position
-#         self.relative_positions = nn.Embedding(2 * max_position - 1, num_heads)
-#         self.register_buffer(
-#             "positions", torch.arange(-max_position + 1, max_position), persistent=False
-#         )
-
-#     def forward(self, seq_len: int) -> torch.Tensor:
-#         """
-#         Apply relative positional embeddings to the input tensor.
-
-#         Parameters
-#         ----------
-#         seq_len: int
-#             The sequence length.
-
-#         Returns
-#         -------
-#         torch.Tensor
-#             The input tensor with relative positional embeddings applied. The shape is (batch, seq_len, num_heads).
-
-#         """
-#         range_vec = torch.arange(seq_len, device=self.relative_positions.weight.device)
-#         relative_positions_matrix = range_vec.unsqueeze(-1) - range_vec.unsqueeze(0)
-#         relative_positions_matrix = relative_positions_matrix + (self.max_position - 1)
-#         relative_positions_matrix = relative_positions_matrix.clamp(
-#             0, 2 * self.max_position - 2
-#         )
-#         rel_embeddings = self.relative_positions(relative_positions_matrix)
-#         return rel_embeddings
