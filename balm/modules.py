@@ -2,7 +2,6 @@
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
-
 from functools import partial
 from typing import Optional, Tuple, Union
 
@@ -22,7 +21,6 @@ __all__ = [
     "SparseFFN",
     "DenseFFN",
     "SwigluFFN",
-    "Expert",
     # heads
     "BalmLMHead",
     "BalmSequenceClassificationHead",
@@ -167,84 +165,6 @@ class BalmSequenceClassificationHead(nn.Module):
 
 # =================================
 #
-#            EXPERTS
-#
-# =================================
-
-
-class Expert(nn.Module):
-    """
-    Expert module for a Sparse Transformer layer.
-
-    Parameters:
-    -----------
-    model_dim : int
-        Model dimension.
-
-    ffn_dim : int
-        Feed-forward network dimension.
-
-    dropout : float, optional
-        Dropout rate. The default is 0.0.
-
-    activation : str, optional
-        Activation function to use. The default is "swiglu".
-
-    bias : bool, optional
-        Whether to use bias. The default is True.
-
-    Returns
-    -------
-    x : torch.Tensor
-        Output tensor of shape (batch_size, sequence_length, model_dim).
-
-    """
-
-    def __init__(
-        self,
-        model_dim: int,
-        ffn_dim: int,
-        dropout: float = 0.0,
-        activation: str = "swiglu",
-        bias: bool = True,
-    ):
-        super().__init__()
-        self.wi = nn.Linear(
-            model_dim,
-            ffn_dim,
-            bias=bias,
-        )
-        self.wo = nn.Linear(
-            ffn_dim,
-            model_dim,
-            bias=bias,
-        )
-        self.activation = get_activation_fn(activation, dim=ffn_dim)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Process the input hidden states.
-
-        Parameters:
-        -----------
-        x : torch.Tensor
-            Input tensor of shape (batch_size, sequence_length, embed_dim).
-
-        Returns:
-        --------
-        x : torch.Tensor
-            Output tensor of shape (batch_size, sequence_length, embed_dim).
-        """
-        x = self.wi(x)
-        x = self.activation(x)
-        x = self.dropout(x)
-        x = self.wo(x)
-        return x
-
-
-# =================================
-#
 #             FFNs
 #
 # =================================
@@ -264,12 +184,9 @@ class DenseFFN(nn.Module):
 
     activation: str, default="gelu"
         Activation function to use.
-
+    
     bias: bool, default=True
         Whether to use bias.
-
-    dropout: float, default=0.0
-        Dropout rate.
 
     Input shape: (batch_size, seq_len, model_dim)
     Output shape: (batch_size, seq_len, model_dim)
@@ -280,12 +197,13 @@ class DenseFFN(nn.Module):
         self,
         model_dim: int,
         ffn_dim: int = None,
+        bias: bool = True,
         activation: str = "gelu",
     ):
         super().__init__()
-        self.wi = nn.Linear(model_dim, ffn_dim) # intermediate dense
+        self.wi = nn.Linear(model_dim, ffn_dim, bias=bias) # intermediate dense
         self.activation = get_activation_fn(activation, dim=ffn_dim)
-        self.wo = nn.Linear(ffn_dim, model_dim) # output dense
+        self.wo = nn.Linear(ffn_dim, model_dim, bias=bias) # output dense
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -322,9 +240,6 @@ class SwigluFFN(nn.Module):
 
     bias: bool, default=True
         Whether to use bias.
-
-    dropout: float, default=0.0
-        Dropout rate.
 
     Input shape: (batch_size, seq_len, model_dim)
     Output shape: (batch_size, seq_len, model_dim)
@@ -382,9 +297,6 @@ class SparseFFN(nn.Module):
     bias: bool, default=True
         Whether to use bias.
 
-    dropout: float, default=0.0
-        Dropout rate.
-
     num_experts: int
         Number of experts.
     
@@ -416,7 +328,6 @@ class SparseFFN(nn.Module):
         router_type: str = "topk",
         activation: str = "swiglu",
         bias: bool = True,
-        dropout: float = 0.0,
     ):
         super().__init__()
         # router
@@ -435,7 +346,6 @@ class SparseFFN(nn.Module):
                 model_dim=model_dim,
                 ffn_dim=ffn_dim,
                 bias=bias,
-                dropout=dropout,
             )
         else:
             expert = partial(
@@ -443,7 +353,6 @@ class SparseFFN(nn.Module):
                 model_dim=model_dim,
                 ffn_dim=ffn_dim,
                 bias=bias,
-                dropout=dropout,
                 activation=activation,
             )
         self.experts = nn.ModuleList([expert() for _ in range(num_experts)])
@@ -504,6 +413,7 @@ class SparseFFN(nn.Module):
         x_flat = x.view(-1, d_model)  # ==> (num_tokens, d_model)
 
         capacity = self._compute_capacity(num_tokens)
+        
         # logits are shape (num_tokens, num_experts)
         # probs and indices are shape (num_experts, expert_capacity)
         router_logits, router_probs, expert_probs, expert_indices = self.router(
@@ -515,17 +425,21 @@ class SparseFFN(nn.Module):
             # get token indices and probs for current expert
             token_indices = expert_indices[expert_idx]  # ==> (expert_capacity,)
             token_probs = expert_probs[expert_idx]  # ==> (expert_capacity,)
+            
             # remove padding (in undersubscribed experts, empty slots are filled with -1)
             valid_token_mask = token_indices >= 0
             valid_token_indices = token_indices[valid_token_mask]
             valid_token_probs = token_probs[valid_token_mask]
             if valid_token_indices.numel() == 0:  # no valid tokens for this expert
                 continue
+            
             # get expert input and weights
             expert_input = x_flat[valid_token_indices]
             weights = valid_token_probs
+            
             # compute expert output
             expert_output = expert(expert_input) * weights.unsqueeze(1)
+            
             # accumulate expert output
             output[valid_token_indices] += expert_output
 
@@ -684,9 +598,6 @@ class DenseTransformerLayer(nn.Module):
     config: PretrainedConfig
         Model config.
 
-    bias: bool, default=True
-        Whether to use bias.
-
     Input shape: (batch_size, seq_len, model_dim)
     Output shape: (batch_size, seq_len, model_dim)
 
@@ -711,6 +622,7 @@ class DenseTransformerLayer(nn.Module):
             model_dim=config.hidden_size,
             ffn_dim=config.intermediate_size,
             activation=config.activation,
+            bias=config.ffn_bias,
         )
         self.ffn_dropout = nn.Dropout(config.hidden_dropout)
 
@@ -718,11 +630,31 @@ class DenseTransformerLayer(nn.Module):
         self,
         x: torch.Tensor,
         padding_mask: Optional[torch.Tensor] = None,
-         
-        # NOTE: if need_weights is True, torch can't use optimized SDPA
-        # see -> https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html
         need_weights: bool = False,
     ) -> torch.Tensor:
+        """
+        Forward pass for the DenseTransformerLayer.
+
+        Parameters:
+        -----------
+        x: torch.Tensor
+            Input tensor of shape (batch_size, seq_len, model_dim)
+
+        padding_mask: Optional[torch.Tensor], default=None
+            Boolean mask indicating padded positions (batch_size, seq_len)
+
+        need_weights: bool, default=False
+            Whether to return attention values.
+            
+            .. warning::
+                If ``need_weights`` is ``True``, torch can't use optimized SDPA.
+                See https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html
+
+        Returns:
+        --------
+        x: torch.Tensor
+            Output tensor of shape (batch_size, seq_len, model_dim)
+        """
 
         # invert padding mask and convert to boolean, since the 🤗 DataCollatorForLanguageModeling
         # uses 0 for padding tokens and 1 for other tokens, but we want True for padding tokens and
@@ -755,98 +687,42 @@ class SparseTransformerLayer(nn.Module):
     """
     Sparse Transformer layer.
 
-    Parameters
-    ----------
-    model_dim: int
-        Token embedding dimension.
-
-    ffn_dim: int
-        Feed-forward dimension.
-
-    num_heads: int
-        Number of attention heads.
-
-    num_experts: int
-        Number of experts in SparseFFN.
-    
-    expert_capacity_type : str
-        The type of expert capacity to use. 
-        If "absolute": tokens per expert; if "multiplier": capacity = multiplier * max_position_embeddings
-
-    max_capacity: Union[int, float]
-        Expert capacity, either absolute or multiplier based on expert_capacity_type
-
-    k: int, default=1
-        Number of experts per token.
-
-    router_type: str, default="topk"
-        Router type. Options are "topk" or "expert choice".
-
-    activation: str, default="swiglu"
-        Activation function.
-
-    bias: bool, default=True
-        Whether to use bias.
-
-    dropout: float, default=0.1
-        Dropout probability.
-
-    position_embedding_type: str, default="rotary"
-        Position embedding type. Only used if rotary embeddings are specified
-        (i.e. `position_embedding_type="rotary"`).
+    Parameters:
+    -----------
+    config: PretrainedConfig
+        Model config.
 
     Input shape: (batch_size, seq_len, d_model)
     Output shape: (batch_size, seq_len, d_model)
     """
 
-    def __init__(
-        self,
-        model_dim: int,
-        ffn_dim: int,
-        num_heads: int,
-        num_experts: int,
-        expert_capacity_type: str,
-        max_capacity: Union[int, float],
-        k: int = 1,
-        router_type: str = "topk",
-        activation: str = "swiglu",
-        bias: bool = True,
-        dropout: float = 0.1,
-        position_embedding_type: str = "rotary",
-    ):
+    def __init__(self, config: PretrainedConfig):
         super().__init__()
-        self.model_dim = model_dim
-        self.num_heads = num_heads
-        self.head_dim = model_dim // num_heads
 
         # attention
-        self.self_attn = SelfAttention(
-            model_dim=model_dim,
-            num_heads=num_heads,
-            dropout=dropout,
-            position_embedding_type=position_embedding_type,
+        self.attn_layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.attention = SelfAttention(
+            model_dim=config.hidden_size,
+            num_heads=config.num_attention_heads,
+            dropout=config.attention_dropout,
+            position_embedding_type=config.position_embedding_type,
         )
+        self.attn_dropout = nn.Dropout(config.attention_dropout)
 
-        # Sparse FFN components
+        # sparse FFN
+        self.ffn_layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.sparse_ffn = SparseFFN(
-            model_dim=model_dim,
-            ffn_dim=ffn_dim,
-            num_experts=num_experts,
-            expert_capacity_type=expert_capacity_type,
-            max_capacity=max_capacity,
-            k=k,
-            router_type=router_type,
-            activation=activation,
-            bias=bias,
+            model_dim=config.hidden_size,
+            ffn_dim=config.intermediate_size,
+            num_experts=config.num_experts,
+            expert_capacity_type=config.expert_capacity_type,
+            max_capacity=config.expert_capacity,
+            k=config.num_experts_per_tok,
+            router_type=config.router_type,
+            activation=config.activation,
+            bias=config.ffn_bias,
         )
-
-        # norm
-        self.norm1 = nn.LayerNorm(model_dim)
-        self.norm2 = nn.LayerNorm(model_dim)
-
-        # dropout
-        self.dropout1 = nn.Dropout(dropout)
-        self.dropout2 = nn.Dropout(dropout)
+        self.ffn_dropout = nn.Dropout(config.hidden_dropout)
 
     def forward(
         self,
@@ -867,6 +743,10 @@ class SparseTransformerLayer(nn.Module):
 
         need_weights: bool, default=False
             Whether to return attention values.
+            
+            .. warning::
+                If ``need_weights`` is ``True``, torch can't use optimized SDPA.
+                See https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html
 
         Returns:
         --------
@@ -880,30 +760,21 @@ class SparseTransformerLayer(nn.Module):
             padding_mask = 1 - padding_mask
             padding_mask = padding_mask.bool()
 
-        # pre-norm
-        residual = x
-        x = self.norm1(x)
-
         # attention
-        # NOTE: if need_weights is True, torch can't use optimized SDPA
-        # see -> https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html
-        attn_out = self.self_attn(
+        residual = x
+        x = self.attn_layer_norm(x)
+        attn_out = self.attention(
             x,
             padding_mask=padding_mask,
             need_weights=need_weights,
         )
-        if need_weights:
-            attn_out, attn_vals = attn_out
-        else:
-            attn_out = attn_out[0]
-        x = residual + self.dropout1(attn_out)
+        attn_out, attn_vals = attn_out if need_weights else (attn_out[0], None)
+        x = residual + self.attn_dropout(attn_out)
 
         # sparse FFN
         residual = x
-        x = self.norm2(x)
+        x = self.ffn_layer_norm(x)
         ffn_out, router_tuple = self.sparse_ffn(x)
-        x = residual + self.dropout2(ffn_out)
+        x = residual + self.ffn_dropout(ffn_out)
 
-        if need_weights:
-            return (x, attn_vals, router_tuple)
-        return (x, router_tuple)
+        return (x, attn_vals, router_tuple) if need_weights else (x, router_tuple)

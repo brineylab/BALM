@@ -1,7 +1,6 @@
-# Copyright (c) 2024 brineylab @ scripps
+# Copyright (c) 2025 brineylab @ scripps
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
-
 
 from typing import Optional
 
@@ -41,6 +40,9 @@ class BalmConfig(PretrainedConfig):
 
     hidden_dropout : float, default=0.1
         The dropout probability for the hidden layers.
+    
+    ffn_bias : bool, default=True
+        Whether to use a bias for FFN layers.
 
     max_position_embeddings : int, default=320
         The maximum position embeddings.
@@ -113,6 +115,7 @@ class BalmConfig(PretrainedConfig):
         dropout: float = 0.1,
         attention_dropout: Optional[float] = None,
         hidden_dropout: Optional[float] = None,
+        ffn_bias: bool = True,
         max_position_embeddings: int = 320,
         initializer_range: float = 0.02,
         layer_norm_eps: float = 1e-5,
@@ -150,6 +153,7 @@ class BalmConfig(PretrainedConfig):
         self.hidden_dropout = float(
             hidden_dropout if hidden_dropout is not None else dropout
         )
+        self.ffn_bias = bool(ffn_bias)
         self.max_position_embeddings = int(max_position_embeddings)
         self.initializer_range = float(initializer_range)
         self.layer_norm_eps = float(layer_norm_eps)

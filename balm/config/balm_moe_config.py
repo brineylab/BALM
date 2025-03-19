@@ -1,7 +1,6 @@
-# Copyright (c) 2024 brineylab @ scripps
+# Copyright (c) 2025 brineylab @ scripps
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
-
 
 from typing import Optional, Union
 
@@ -41,6 +40,10 @@ class BalmMoEConfig(PretrainedConfig):
 
     hidden_dropout : float, default=0.1
         The dropout probability for the hidden layers.
+    
+    ffn_bias : bool, default=True
+        Whether to use a bias for FFN layers.
+        In MoE models this is the bias in the experts.
 
     max_position_embeddings : int, default=320
         The maximum position embeddings.
@@ -84,9 +87,6 @@ class BalmMoEConfig(PretrainedConfig):
     expert_activation : str, default="gelu"
         The activation function to use for the experts.
         Options are "swiglu", "relu", "gelu".
-
-    expert_bias : bool, default=True
-        Whether to use a bias for the experts.
 
     expert_dropout : float, default=0.1
         The dropout probability for the expert layers.
@@ -152,6 +152,7 @@ class BalmMoEConfig(PretrainedConfig):
         dropout: float = 0.1,
         attention_dropout: Optional[float] = None,
         hidden_dropout: Optional[float] = None,
+        ffn_bias: bool = True,
         max_position_embeddings: int = 320,
         initializer_range: float = 0.02,
         layer_norm_eps: float = 1e-5,
@@ -169,7 +170,6 @@ class BalmMoEConfig(PretrainedConfig):
         expert_capacity_type: str = "multiplier",  # "absolute" or "multiplier"
         expert_capacity: Union[int, float] = 1,
         expert_activation: str = "gelu",
-        expert_bias: bool = True,
         expert_dropout: Optional[float] = None,
         alternate_sparsity: bool = True,
         # router losses
@@ -208,6 +208,7 @@ class BalmMoEConfig(PretrainedConfig):
         self.hidden_dropout = float(
             hidden_dropout if hidden_dropout is not None else dropout
         )
+        self.ffn_bias = bool(ffn_bias)
         self.max_position_embeddings = int(max_position_embeddings)
         self.initializer_range = float(initializer_range)
         self.layer_norm_eps = float(layer_norm_eps)
@@ -238,7 +239,6 @@ class BalmMoEConfig(PretrainedConfig):
         self.expert_capacity_type = expert_capacity_type.lower()
         self.expert_capacity = expert_capacity
         self.expert_activation = expert_activation.lower()
-        self.expert_bias = bool(expert_bias)
         self.expert_dropout = float(
             expert_dropout if expert_dropout is not None else dropout
         )

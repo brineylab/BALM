@@ -1,4 +1,4 @@
-# Copyright (c) 2024 brineylab @ scripps
+# Copyright (c) 2025 brineylab @ scripps
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
@@ -6,7 +6,6 @@ from typing import Optional, Union
 
 import torch
 import torch.nn as nn
-from transformers import PretrainedConfig
 
 from ..config import BalmMoEConfig
 from ..loss import router_load_balancing_loss, router_z_loss
@@ -14,10 +13,18 @@ from ..modules import (
     BalmLMHead,
     BalmSequenceClassificationHead,
     DenseTransformerLayer,
-    SparseTransformerLayer,
+    SparseTransformerLayer
 )
-from ..outputs import MoEMaskedLMOutput, MoEModelOutput, MoESequenceClassifierOutput
-from .base import BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin
+from ..outputs import (
+    MoEModelOutput,
+    MoEMaskedLMOutput,
+    MoESequenceClassifierOutput
+)
+from .base import (
+    BalmPreTrainedModel, 
+    FreezeBaseModelMixin, 
+    ParameterCountMixin
+)
 
 __all__ = [
     "BalmMoEModel",
@@ -27,36 +34,24 @@ __all__ = [
 
 
 class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
-    """Transformer with alternating sparse/dense layers.
-
+    """
     Parameters:
     -----------
     config: BalmMoEConfig
         Configuration object defining model architecture and hyperparameters.
-
-    Input shape: (batch_size, seq_len)
-    Output shape: (batch_size, seq_len, d_model)
     """
 
-    def __init__(self, config: PretrainedConfig):
+    def __init__(self, config: BalmMoEConfig):
         super().__init__(config)
-
         self.config = config
 
         # embedding
-        self.embeddings = nn.Embedding(config.vocab_size, config.hidden_size)
-        self.token_type_embeddings = nn.Embedding(
-            config.type_vocab_size, config.hidden_size
-        )
+        self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size)
         self.position_embeddings = (
             nn.Embedding(config.max_position_embeddings, config.hidden_size)
             if config.position_embedding_type == "absolute"
             else None
         )
-
-        # dropout
-        self.dropout = nn.Dropout(config.dropout)
-        self.embed_dropout = nn.Dropout(config.token_dropout)
 
         # layers
         self.layers = nn.ModuleList()
@@ -64,52 +59,24 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
             if self.config.alternate_sparsity:
                 # alternate dense/sparse layers, dense first
                 if layer_idx % 2 == 0:
-                    layer = DenseTransformerLayer(
-                        model_dim=self.config.hidden_size,
-                        ffn_dim=self.config.intermediate_size,
-                        num_heads=self.config.num_attention_heads,
-                        activation=self.config.activation,
-                        dropout=self.config.dropout,
-                        position_embedding_type=self.config.position_embedding_type,
-                    )
+                    layer = DenseTransformerLayer(config)
                 else:
-                    layer = SparseTransformerLayer(
-                        model_dim=self.config.hidden_size,
-                        ffn_dim=self.config.intermediate_size,
-                        num_heads=self.config.num_attention_heads,
-                        num_experts=self.config.num_experts,
-                        expert_capacity_type=self.config.expert_capacity_type,
-                        max_capacity=self.config.expert_capacity,
-                        k=self.config.num_experts_per_tok,
-                        router_type=self.config.router_type,
-                        activation=self.config.activation,
-                        dropout=self.config.dropout,
-                        position_embedding_type=self.config.position_embedding_type,
-                    )
+                    layer = SparseTransformerLayer(config)
             else:
                 # all sparse layers
-                layer = SparseTransformerLayer(
-                    model_dim=self.config.hidden_size,
-                    ffn_dim=self.config.intermediate_size,
-                    num_heads=self.config.num_attention_heads,
-                    num_experts=self.config.num_experts,
-                    max_capacity=self.config.expert_capacity,
-                    k=self.config.num_experts_per_tok,
-                    router_type=self.config.router_type,
-                    activation=self.config.activation,
-                    dropout=self.config.dropout,
-                    position_embedding_type=self.config.position_embedding_type,
-                )
+                layer = SparseTransformerLayer(config)
             self.layers.append(layer)
 
         # final layer norm
         self.final_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
+        # initialize weights and apply final processing
+        self.post_init()
+
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.BoolTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         output_attentions: Optional[bool] = None,
@@ -196,19 +163,16 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
             input_shape = input_ids.size()
         else:
             input_shape = inputs_embeds.size()[:-1]
-        if token_type_ids is None:
-            token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
         if position_ids is None and self.position_embeddings is not None:
             position_ids = torch.arange(input_shape[1], dtype=torch.long, device=device)
             position_ids = position_ids.unsqueeze(0).expand(input_shape)
-
-        # embeddings
         if inputs_embeds is None:
-            inputs_embeds = self.embeddings(input_ids)
-        embeddings = inputs_embeds + self.token_type_embeddings(token_type_ids)
+            inputs_embeds = self.word_embeddings(input_ids)
+        
+        # embeddings
+        x = inputs_embeds
         if self.position_embeddings is not None and position_ids is not None:
-            embeddings = embeddings + self.position_embeddings(position_ids)
-        x = self.embed_dropout(embeddings)
+            x = x + self.position_embeddings(position_ids)
 
         # layers
         for layer in self.layers:
@@ -276,7 +240,6 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
                 ]
                 if v is not None
             )
-
         return MoEModelOutput(
             last_hidden_state=x,
             hidden_states=all_hidden_states,
@@ -310,15 +273,11 @@ class BalmMoEForMaskedLM(
         config: BalmMoEConfig,
     ):
         super().__init__(config)
-        # model
-        self.balm = BalmMoEModel(config=self.config)
+        self.config = config
 
-        # LM head
-        self.lm_head = BalmLMHead(
-            hidden_size=self.config.hidden_size,
-            output_dim=self.config.vocab_size,
-            activation=self.config.mlm_activation,
-        )
+        # model
+        self.balm = BalmMoEModel(config)
+        self.lm_head = BalmLMHead(config)
 
         # loss function
         self.criterion = nn.CrossEntropyLoss(ignore_index=-100)
@@ -328,6 +287,9 @@ class BalmMoEForMaskedLM(
         # so that we can zero them out in freeze_base_model() if necessary
         self.router_z_loss_coef = config.router_z_loss_coef
         self.router_aux_loss_coef = config.router_aux_loss_coef
+
+        # initialize weights
+        self.init_weights()
 
     def forward(
         self,
@@ -401,7 +363,7 @@ class BalmMoEForMaskedLM(
         lm_logits = self.lm_head(x)
 
         # loss
-        lm_loss = None
+        loss, z_loss, aux_loss, lm_loss = None, None, None, None
         if labels is not None:
             # lm loss
             labels = labels.to(lm_logits.device)
@@ -411,16 +373,11 @@ class BalmMoEForMaskedLM(
 
             # router loss(es)
             z_loss = self.router_z_loss_coef * (outputs.z_loss)
-            if self.config.router_type == "expert choice":
+            if self.config.router_type == "expert choice": # no aux loss
                 loss = lm_loss + z_loss
-                aux_loss = None
             else:
                 aux_loss = self.router_aux_loss_coef * (outputs.aux_loss)
                 loss = lm_loss + z_loss + aux_loss
-        else:
-            loss = None
-            z_loss = None
-            aux_loss = None
 
         # outputs
         if not return_dict:
@@ -439,7 +396,6 @@ class BalmMoEForMaskedLM(
                 ]
                 if v is not None
             )
-
         return MoEMaskedLMOutput(
             loss=loss,
             logits=lm_logits,
@@ -475,21 +431,11 @@ class BalmMoEForSequenceClassification(
         config: BalmMoEConfig,
     ):
         super().__init__(config)
-        # model
-        self.balm = BalmMoEModel(config=self.config)
+        self.config = config
 
-        # classifier
-        classifier_dropout = (
-            self.config.classifier_dropout
-            if self.config.classifier_dropout is not None
-            else self.config.dropout
-        )
-        self.classifier = BalmSequenceClassificationHead(
-            hidden_size=self.config.hidden_size,
-            num_labels=self.config.num_labels,
-            dropout=classifier_dropout,
-            activation=self.config.classifier_activation,
-        )
+        # model
+        self.balm = BalmMoEModel(config)
+        self.classifier = BalmSequenceClassificationHead(config)
 
         # loss function
         self.criterion = nn.CrossEntropyLoss()
@@ -497,6 +443,9 @@ class BalmMoEForSequenceClassification(
         # router loss coefficients
         self.router_z_loss_coef = self.config.router_z_loss_coef
         self.router_aux_loss_coef = self.config.router_aux_loss_coef
+
+        # initialize weights
+        self.init_weights()
 
     def forward(
         self,
@@ -602,7 +551,6 @@ class BalmMoEForSequenceClassification(
                 ]
                 if v is not None
             )
-
         return MoESequenceClassifierOutput(
             loss=loss,
             logits=classifier_logits,
