@@ -29,46 +29,26 @@ class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
         self.config = config
 
         # embedding
-        self.embeddings = nn.Embedding(config.vocab_size, config.hidden_size)
-        self.token_type_embeddings = nn.Embedding(
-            config.type_vocab_size, config.hidden_size
-        )
+        self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size)
         self.position_embeddings = (
             nn.Embedding(config.max_position_embeddings, config.hidden_size)
             if config.position_embedding_type == "absolute"
             else None
         )
 
-        # dropout
-        self.dropout = nn.Dropout(config.dropout)
-        self.embed_dropout = nn.Dropout(config.token_dropout)
-
         # layers
-        self.layers = nn.ModuleList(
-            [
-                DenseTransformerLayer(
-                    model_dim=self.config.hidden_size,
-                    ffn_dim=self.config.intermediate_size,
-                    num_heads=self.config.num_attention_heads,
-                    activation=self.config.activation,
-                    dropout=self.config.dropout,
-                    position_embedding_type=self.config.position_embedding_type,
-                )
-                for _ in range(config.num_hidden_layers)
-            ]
-        )
+        self.layers = nn.ModuleList([DenseTransformerLayer(config) for _ in range(config.num_hidden_layers)])
 
         # final layer norm
         self.final_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
-        # # init weights
-        # self.init_weights()
+        # initialize weights and apply final processing
+        self.post_init()
 
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.BoolTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         output_attentions: Optional[bool] = None,
@@ -79,7 +59,7 @@ class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
         Parameters:
         -----------
 
-        input_ids: torch.LomgTensor
+        input_ids: torch.LongTensor
             Tokenized input IDs, of shape (batch_size, sequence_length). Cannot be provided if
             `inputs_embeds` is also provided.
 
@@ -87,9 +67,6 @@ class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
             Attention mask, of shape (batch_size, sequence_length). If boolean, ``True`` indicates that
             tokens should be ignored for attention purposes. If float, it is added to the attention
             scores.
-
-        token_type_ids: torch.LongTensor
-            Token type IDs, of shape (batch_size, sequence_length).
 
         position_ids: torch.LongTensor
             Position IDs, of shape (batch_size, sequence_length).
@@ -132,9 +109,7 @@ class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
         # init
         all_self_attentions = () if output_attentions else None
         all_hidden_states = () if output_hidden_states else None
-        return_dict = (
-            return_dict if return_dict is not None else self.config.return_dict
-        )
+
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot provide both input_ids and inputs_embeds")
         device = input_ids.device if input_ids is not None else inputs_embeds.device
@@ -144,19 +119,16 @@ class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
             input_shape = input_ids.size()
         else:
             input_shape = inputs_embeds.size()[:-1]
-        if token_type_ids is None:
-            token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
         if position_ids is None and self.position_embeddings is not None:
             position_ids = torch.arange(input_shape[1], dtype=torch.long, device=device)
             position_ids = position_ids.unsqueeze(0).expand(input_shape)
         if inputs_embeds is None:
-            inputs_embeds = self.embeddings(input_ids)
+            inputs_embeds = self.word_embeddings(input_ids)
 
         # embeddings
-        embeddings = inputs_embeds + self.token_type_embeddings(token_type_ids)
+        x = inputs_embeds
         if self.position_embeddings is not None and position_ids is not None:
-            embeddings = embeddings + self.position_embeddings(position_ids)
-        x = self.embed_dropout(embeddings)
+            x = x + self.position_embeddings(position_ids)
 
         # layers
         for layer in self.layers:
@@ -190,7 +162,6 @@ class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
                 ]
                 if v is not None
             )
-
         return BaseModelOutput(
             last_hidden_state=x,
             hidden_states=all_hidden_states,
@@ -221,22 +192,18 @@ class BalmForMaskedLM(BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountM
 
         # model
         self.balm = BalmModel(config=self.config)
-
-        # LM head
-        self.lm_head = BalmLMHead(
-            hidden_size=self.config.hidden_size,
-            output_dim=self.config.vocab_size,
-            activation=self.config.mlm_activation,
-        )
+        self.lm_head = BalmLMHead(config=self.config)
 
         # loss function
         self.criterion = nn.CrossEntropyLoss(ignore_index=-100)
+
+        # initialize weights
+        self.init_weights()
 
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.BoolTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         output_attentions: Optional[bool] = None,
@@ -254,9 +221,6 @@ class BalmForMaskedLM(BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountM
 
         attention_mask: torch.BoolTensor
             Attention mask
-
-        token_type_ids: torch.LongTensor
-            Token type IDs, of shape (batch_size, sequence_length).
 
         position_ids: torch.LongTensor
             Position IDs, of shape (batch_size, sequence_length).
@@ -296,7 +260,6 @@ class BalmForMaskedLM(BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountM
         outputs = self.balm(
             input_ids,
             attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
             position_ids=position_ids,
             inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
@@ -328,7 +291,6 @@ class BalmForMaskedLM(BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountM
                 ]
                 if v is not None
             )
-
         return MaskedLMOutput(
             loss=loss,
             logits=lm_logits,
@@ -361,20 +323,11 @@ class BalmForSequenceClassification(
         super().__init__(config)
         # model
         self.balm = BalmModel(config=self.config)
+        self.classifier = BalmSequenceClassificationHead(config)
 
-        # classifier
-        classifier_dropout = (
-            self.config.classifier_dropout
-            if self.config.classifier_dropout is not None
-            else self.config.dropout
-        )
-        self.classifier = BalmSequenceClassificationHead(
-            hidden_size=self.config.hidden_size,
-            num_labels=self.config.num_labels,
-            dropout=classifier_dropout,
-            activation=self.config.classifier_activation,
-        )
-
+        # initialize weights
+        self.init_weights()
+        
         # loss function
         self.criterion = nn.CrossEntropyLoss()
 
@@ -382,7 +335,6 @@ class BalmForSequenceClassification(
         self,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.BoolTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         output_attentions: Optional[bool] = None,
@@ -423,7 +375,6 @@ class BalmForSequenceClassification(
         outputs = self.balm(
             input_ids,
             attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
             position_ids=position_ids,
             inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
@@ -444,7 +395,7 @@ class BalmForSequenceClassification(
                 labels.view(-1),
             )
         else:
-            loss = None
+            classifier_loss = None
 
         # outputs
         if not return_dict:
@@ -459,9 +410,8 @@ class BalmForSequenceClassification(
                 ]
                 if v is not None
             )
-
         return SequenceClassifierOutput(
-            loss=loss,
+            loss=classifier_loss,
             logits=classifier_logits,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,

@@ -13,6 +13,7 @@ import torch.nn.functional as F
 from .activation import get_activation_fn
 from .embedding import RotaryPositionalEmbedding
 from .router import ExpertChoiceRouter, TopKRouter
+from transformers import PretrainedConfig
 
 __all__ = [
     # layers
@@ -25,7 +26,7 @@ __all__ = [
     # heads
     "BalmLMHead",
     "BalmSequenceClassificationHead",
-    "BalmTokenClassificationHead",
+    # "BalmTokenClassificationHead",
 ]
 
 
@@ -53,13 +54,14 @@ class BalmLMHead(nn.Module):
 
     """
 
-    def __init__(self, hidden_size: int, output_dim: int, activation: str = "gelu"):
+    def __init__(self, config):
         super().__init__()
-        self.dense = nn.Linear(hidden_size, hidden_size)
-        self.layer_norm = nn.LayerNorm(hidden_size)
-        self.decoder = nn.Linear(hidden_size, output_dim, bias=False)
-        self.bias = nn.Parameter(torch.zeros(output_dim))
-        self.activation = get_activation_fn(activation)
+        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+        self.activation = get_activation_fn(config.mlm_activation)
+        self.layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+
+        self.decoder = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.bias = nn.Parameter(torch.zeros(config.vocab_size))
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
         """
@@ -79,7 +81,7 @@ class BalmLMHead(nn.Module):
         x = self.dense(features)
         x = self.activation(x)
         x = self.layer_norm(x)
-        x = self.decoder(x) + self.bias
+        x = self.decoder(x) + self.bias # proj to vocab size
         return x
 
 
@@ -89,34 +91,20 @@ class BalmSequenceClassificationHead(nn.Module):
 
     Parameters
     ----------
-    hidden_size : int
-        Hidden size.
-
-    num_labels : int
-        Number of labels.
-
-    dropout : float, optional
-        Dropout rate. The default is 0.0.
-
-    activation : str, optional
-        Activation function to use. The default is "tanh".
+    config: PretrainedConfig
+        Model config.
 
     """
 
-    def __init__(
-        self,
-        hidden_size: int,
-        num_labels: int,
-        dropout: float = 0.0,
-        activation: str = "tanh",
+    def __init__(self, config: PretrainedConfig
     ):
         super().__init__()
-        self.dense = nn.Linear(hidden_size, hidden_size)
-        self.dropout = nn.Dropout(dropout)
-        self.out_proj = nn.Linear(hidden_size, num_labels)
+        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+        self.dropout = nn.Dropout(config.classifier_dropout)
+        self.out_proj = nn.Linear(self.hidden_size, self.num_labels)
 
         # activation
-        self.activation = get_activation_fn(activation)
+        self.activation = get_activation_fn(config.classifier_activation)
 
     def forward(self, features: torch.Tensor, **kwargs) -> torch.Tensor:
         """
@@ -142,46 +130,39 @@ class BalmSequenceClassificationHead(nn.Module):
         return x
 
 
-class BalmTokenClassificationHead(nn.Module):
-    """
-    Head for token-level classification tasks.
+# class BalmTokenClassificationHead(nn.Module):
+#     """
+#     Head for token-level classification tasks.
 
-    Parameters
-        ----------
-        hidden_size : int
-            Hidden size.
+#     Parameters
+#         ----------
+#         config: PretrainedConfig
+#             Model config.
+#     """
 
-        num_labels : int
-            Number of labels.
+#     def __init__(self, config: PretrainedConfig):
+#         super().__init__()
+#         self.dropout = nn.Dropout(config.classifier_dropout)
+#         self.out_proj = nn.Linear(config.hidden_size, config.num_labels)
 
-        dropout : float, optional
-            Dropout rate. The default is 0.0.
+#     def forward(self, features: torch.Tensor, **kwargs) -> torch.Tensor:
+#         """
+#         BalmTokenClassificationHead forward pass.
 
-    """
+#         Parameters
+#         ----------
+#         features : torch.Tensor
+#             Features tensor of shape (batch_size, sequence_length, hidden_size).
 
-    def __init__(self, hidden_size: int, num_labels: int, dropout: float = 0.0):
-        super().__init__()
-        self.dropout = nn.Dropout(dropout)
-        self.out_proj = nn.Linear(hidden_size, num_labels)
+#         Returns
+#         -------
+#         x : torch.Tensor
+#             Output tensor of shape (batch_size, sequence_length, num_labels).
 
-    def forward(self, features: torch.Tensor, **kwargs) -> torch.Tensor:
-        """
-        BalmTokenClassificationHead forward pass.
-
-        Parameters
-        ----------
-        features : torch.Tensor
-            Features tensor of shape (batch_size, sequence_length, hidden_size).
-
-        Returns
-        -------
-        x : torch.Tensor
-            Output tensor of shape (batch_size, sequence_length, num_labels).
-
-        """
-        x = self.dropout(features)
-        x = self.out_proj(x)
-        return x
+#         """
+#         x = self.dropout(features)
+#         x = self.out_proj(x)
+#         return x
 
 
 # =================================
@@ -300,14 +281,11 @@ class DenseFFN(nn.Module):
         model_dim: int,
         ffn_dim: int = None,
         activation: str = "gelu",
-        bias: bool = True,
-        dropout: float = 0.0,
     ):
         super().__init__()
-        self.wi = nn.Linear(model_dim, ffn_dim, bias=bias)
-        self.wo = nn.Linear(ffn_dim, model_dim, bias=bias)
+        self.wi = nn.Linear(model_dim, ffn_dim) # intermediate dense
         self.activation = get_activation_fn(activation, dim=ffn_dim)
-        self.dropout = nn.Dropout(dropout)
+        self.wo = nn.Linear(ffn_dim, model_dim) # output dense
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -326,7 +304,8 @@ class DenseFFN(nn.Module):
         """
         x = self.wi(x)
         x = self.activation(x)
-        return self.dropout(self.wo(x))
+        x = self.wo(x)
+        return x
 
 
 class SwigluFFN(nn.Module):
@@ -356,14 +335,12 @@ class SwigluFFN(nn.Module):
         model_dim: int,
         ffn_dim: int = None,
         bias: bool = True,
-        dropout: float = 0.0,
         activation: str = "swiglu",  # unused, only here for signature compatibility with DenseFFN
     ):
         super().__init__()
         self.gate_linear = nn.Linear(model_dim, ffn_dim, bias=bias)
         self.value_linear = nn.Linear(model_dim, ffn_dim, bias=bias)
         self.wo = nn.Linear(ffn_dim, model_dim, bias=bias)
-        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -383,7 +360,8 @@ class SwigluFFN(nn.Module):
         gate = self.gate_linear(x)
         value = self.value_linear(x)
         x = value * F.silu(gate)
-        return self.dropout(self.wo(x))
+        x = self.wo(x)
+        return x
 
 
 class SparseFFN(nn.Module):
@@ -590,11 +568,18 @@ class SelfAttention(nn.Module):
         position_embedding_type: str = "rotary",
     ):
         super().__init__()
+
+        if model_dim % num_heads != 0:
+            raise ValueError(f"Model dim ({model_dim}) must be divisible by num_heads ({num_heads}).")
+        
+        self.head_dim =  model_dim // num_heads
+        self.num_heads = num_heads
+        self.all_head_size = self.num_heads * self.head_dim
+
         # embeddings
-        if position_embedding_type == "rotary":
-            self.rotary_embed = RotaryPositionalEmbedding(dim=model_dim // num_heads)
-        else:
-            self.rotary_embed = None
+        self.rotary_embed = (
+            RotaryPositionalEmbedding(self.head_dim) if position_embedding_type == "rotary" else None
+        )
 
         # attention
         self.self_attn = nn.MultiheadAttention(
@@ -640,13 +625,15 @@ class SelfAttention(nn.Module):
             positions = torch.arange(seq_len, device=x.device).expand(
                 batch_size, seq_len
             )
+
+            # reshape
+            q = q.view(batch_size, seq_len, self.num_heads, self.head_dim)
+            k = k.view(batch_size, seq_len, self.num_heads, self.head_dim)
+
             # apply rotary embeddings
-            num_heads = self.self_attn.num_heads
-            head_dim = q.size(-1) // num_heads
-            q = q.view(batch_size, seq_len, num_heads, head_dim)
-            k = k.view(batch_size, seq_len, num_heads, head_dim)
             q = self.rotary_embed(q, positions)
             k = self.rotary_embed(k, positions)
+            
             # reshape back to (batch_size, seq_len, model_dim)
             q = q.view(batch_size, seq_len, -1)
             k = k.view(batch_size, seq_len, -1)
@@ -659,6 +646,7 @@ class SelfAttention(nn.Module):
             key_padding_mask=padding_mask,
             need_weights=need_weights,
         )
+
         return attn_out
 
     def _in_proj(
@@ -693,75 +681,49 @@ class DenseTransformerLayer(nn.Module):
 
     Parameters:
     -----------
-    model_dim: int
-        Model dimension.
-
-    ffn_dim: int | None, default=None
-        Feed-forward dimension. If not provided, it will be set to 4x the model dimension.
-
-    num_heads: int, default=20
-        Number of attention heads.
-
-    activation: str, default="swiglu"
-        Activation function to use.
+    config: PretrainedConfig
+        Model config.
 
     bias: bool, default=True
         Whether to use bias.
-
-    dropout: float, default=0.1
-        Dropout rate.
-
-    position_embedding_type: str, default="rotary"
-        Position embedding type. Only used if rotary embeddings are used (i.e. `position_embedding_type="rotary"`).
 
     Input shape: (batch_size, seq_len, model_dim)
     Output shape: (batch_size, seq_len, model_dim)
 
     """
 
-    def __init__(
-        self,
-        model_dim: int,
-        ffn_dim: int | None = None,
-        num_heads: int = 20,
-        activation: str = "swiglu",
-        bias: bool = True,
-        dropout: float = 0.1,
-        position_embedding_type: str = "rotary",
-    ):
+    def __init__(self, config: PretrainedConfig):
         super().__init__()
-
         # attention
-        self.self_attn = SelfAttention(
-            model_dim=model_dim,
-            num_heads=num_heads,
-            dropout=dropout,
-            position_embedding_type=position_embedding_type,
+        self.attn_layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.attention = SelfAttention(
+            model_dim=config.hidden_size,
+            num_heads=config.num_attention_heads,
+            dropout=config.attention_dropout,
+            position_embedding_type=config.position_embedding_type,
         )
+        self.attn_dropout = nn.Dropout(config.attention_dropout)
 
         # FFN
-        ffn_class = SwigluFFN if activation.lower() == "swiglu" else DenseFFN
+        self.ffn_layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        ffn_class = SwigluFFN if config.activation.lower() == "swiglu" else DenseFFN
         self.ffn = ffn_class(
-            model_dim=model_dim,
-            ffn_dim=ffn_dim,
-            activation=activation,
-            bias=bias,
+            model_dim=config.hidden_size,
+            ffn_dim=config.intermediate_size,
+            activation=config.activation,
         )
-
-        # norm
-        self.norm1 = nn.LayerNorm(model_dim)
-        self.norm2 = nn.LayerNorm(model_dim)
-
-        # dropout
-        self.dropout1 = nn.Dropout(dropout)  # attention dropout
-        self.dropout2 = nn.Dropout(dropout)  # ffn dropout
+        self.ffn_dropout = nn.Dropout(config.hidden_dropout)
 
     def forward(
         self,
         x: torch.Tensor,
         padding_mask: Optional[torch.Tensor] = None,
+         
+        # NOTE: if need_weights is True, torch can't use optimized SDPA
+        # see -> https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html
         need_weights: bool = False,
     ) -> torch.Tensor:
+
         # invert padding mask and convert to boolean, since the 🤗 DataCollatorForLanguageModeling
         # uses 0 for padding tokens and 1 for other tokens, but we want True for padding tokens and
         # False for other tokens
@@ -769,32 +731,24 @@ class DenseTransformerLayer(nn.Module):
             padding_mask = 1 - padding_mask
             padding_mask = padding_mask.bool()
 
-        # pre-norm
-        residual = x
-        x = self.norm1(x)
-
         # attention
-        # NOTE: if need_weights is True, torch can't use optimized SDPA
-        # see -> https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html
-        attn_out = self.self_attn(
+        residual = x
+        x = self.attn_layer_norm(x)
+        attn_out = self.attention(
             x,
             padding_mask=padding_mask,
             need_weights=need_weights,
         )
-        if need_weights:
-            attn_out, attn_vals = attn_out
-        else:
-            attn_out = attn_out[0]
-        x = residual + self.dropout1(attn_out)
+        attn_out, attn_vals = attn_out if need_weights else (attn_out[0], None)
+        x = residual + self.attn_dropout(attn_out)
 
         # FFN
         residual = x
-        x = self.norm2(x)
-        x = residual + self.dropout2(self.ffn(x))
+        x = self.ffn_layer_norm(x)
+        x = self.ffn(x)
+        x = residual + self.ffn_dropout(x)
 
-        if need_weights:
-            return (x, attn_vals)
-        return x
+        return (x, attn_vals) if need_weights else x
 
 
 class SparseTransformerLayer(nn.Module):
