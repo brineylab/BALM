@@ -61,9 +61,6 @@ class BalmConfig(PretrainedConfig):
     pad_token_id : int, default=1
         The pad token id.
 
-    type_vocab_size : int, default=2
-        Vocabulary size of the token_type_ids`
-
     num_labels : int, default=2
         The number of labels for the classification head (sequence or token classification).
 
@@ -122,7 +119,6 @@ class BalmConfig(PretrainedConfig):
         position_embedding_type: str = "rotary",
         mask_token_id: int = 31,
         pad_token_id: int = 1,
-        type_vocab_size: int = 2,
         # mlm
         mlm_activation: str = "gelu",
         # classification
@@ -158,7 +154,6 @@ class BalmConfig(PretrainedConfig):
         self.initializer_range = float(initializer_range)
         self.layer_norm_eps = float(layer_norm_eps)
         self.position_embedding_type = position_embedding_type.lower()
-        self.type_vocab_size = int(type_vocab_size)
         self.use_cache = bool(use_cache)
 
         # classification
