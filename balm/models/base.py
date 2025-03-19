@@ -1,4 +1,4 @@
-# Copyright (c) brineylab @ scripps
+# Copyright (c) 2025 brineylab @ scripps
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
@@ -15,6 +15,7 @@ WEIGHTS_NAME = "model.pt"
 SAFE_WEIGHTS_NAME = "model.safetensors"
 
 __all__ = ["BalmPreTrainedModel", "FreezeBaseModelMixin", "ParameterCountMixin"]
+
 
 class BalmPreTrainedModel(PreTrainedModel):
     """

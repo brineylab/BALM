@@ -12,6 +12,7 @@ from transformers import PretrainedConfig
 
 __all__ = ["TopKRouter", "ExpertChoiceRouter"]
 
+
 class TopKRouter(nn.Module):
     """
     Router that implements the "token choice of top-k experts" strategy. For example, if k=1, this

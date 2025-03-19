@@ -2,7 +2,6 @@
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
-
 import torch
 from torch.nn import functional as F
 

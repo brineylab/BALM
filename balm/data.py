@@ -1,7 +1,6 @@
-# Copyright (c) 2024 brineylab @ scripps
+# Copyright (c) 2025 brineylab @ scripps
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
-
 
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Union
@@ -19,6 +18,7 @@ from transformers.tokenization_utils_base import BatchEncoding
 __all__ = [
     "load_dataset"
 ]
+
 
 def load_dataset(
     file_format: str,

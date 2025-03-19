@@ -1,18 +1,28 @@
-# Copyright (c) 2024 brineylab @ scripps
+# Copyright (c) 2025 brineylab @ scripps
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
-
 
 from typing import Optional, Union
 
 import torch
 import torch.nn as nn
-from transformers import PretrainedConfig
 
 from ..config import BalmConfig
-from ..modules import BalmLMHead, BalmSequenceClassificationHead, DenseTransformerLayer
-from ..outputs import BaseModelOutput, MaskedLMOutput, SequenceClassifierOutput
-from .base import BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin
+from ..modules import (
+    BalmLMHead, 
+    BalmSequenceClassificationHead, 
+    DenseTransformerLayer
+)
+from ..outputs import (
+    BaseModelOutput, 
+    MaskedLMOutput, 
+    SequenceClassifierOutput
+)
+from .base import (
+    BalmPreTrainedModel, 
+    FreezeBaseModelMixin, 
+    ParameterCountMixin
+)
 
 __all__ = [
     "BalmModel",
@@ -20,11 +30,16 @@ __all__ = [
     "BalmForSequenceClassification",
 ]
 
-class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
-    config_class = BalmConfig
-    base_model_prefix = None
 
-    def __init__(self, config: PretrainedConfig):
+class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
+    """
+    Parameters:
+    -----------
+    config: BalmConfig
+        Configuration object defining model architecture and hyperparameters.
+    """
+
+    def __init__(self, config: BalmConfig):
         super().__init__(config)
         self.config = config
 
@@ -168,6 +183,7 @@ class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
             attentions=all_self_attentions,
         )
 
+
 class BalmForMaskedLM(BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin):
     """
     BALM model for masked language modeling.
@@ -191,8 +207,8 @@ class BalmForMaskedLM(BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountM
         self.config = config
 
         # model
-        self.balm = BalmModel(config=self.config)
-        self.lm_head = BalmLMHead(config=self.config)
+        self.balm = BalmModel(config)
+        self.lm_head = BalmLMHead(config)
 
         # loss function
         self.criterion = nn.CrossEntropyLoss(ignore_index=-100)
@@ -321,15 +337,17 @@ class BalmForSequenceClassification(
         config: BalmConfig,
     ):
         super().__init__(config)
-        # model
-        self.balm = BalmModel(config=self.config)
-        self.classifier = BalmSequenceClassificationHead(config)
+        self.config = config
 
-        # initialize weights
-        self.init_weights()
+        # model
+        self.balm = BalmModel(config)
+        self.classifier = BalmSequenceClassificationHead(config)
         
         # loss function
         self.criterion = nn.CrossEntropyLoss()
+
+        # initialize weights
+        self.init_weights()
 
     def forward(
         self,

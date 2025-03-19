@@ -1,4 +1,9 @@
+# Copyright (c) 2025 brineylab @ scripps
+# Distributed under the terms of the MIT License.
+# SPDX-License-Identifier: MIT
+
 from transformers import Trainer
+
 
 class LossLoggingTrainer(Trainer):
     def __init__(self, *args, **kwargs):

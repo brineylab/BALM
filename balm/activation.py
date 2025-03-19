@@ -1,9 +1,10 @@
-# Copyright (c) 2024 brineylab @ scripps
+# Copyright (c) 2025 brineylab @ scripps
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
 from typing import Union
 import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -63,6 +64,7 @@ def get_activation_fn(
         f"Activation must be a string or a PyTorch module, got {type(activation)}"
     )
 
+
 class GELU(nn.Module):
     """
     GELU activation function from original ESM repo. 
@@ -71,6 +73,7 @@ class GELU(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0)))
+
 
 class SwiGLU(nn.Module):
     """

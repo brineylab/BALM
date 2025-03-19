@@ -1,4 +1,4 @@
-# Copyright (c) 2024 brineylab @ scripps
+# Copyright (c) 2025 brineylab @ scripps
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
@@ -16,6 +16,7 @@ __all__ = [
     "BalmTokenizer",
     "DEFAULT_VOCAB",
 ]
+
 
 class BalmTokenizer(PreTrainedTokenizerFast):
     """
@@ -116,6 +117,7 @@ class BalmTokenizer(PreTrainedTokenizerFast):
             mask_token=mask_token,
             **kwargs,
         )
+
 
 DEFAULT_VOCAB = [
     "<cls>",
