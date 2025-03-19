@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 from typing import Union
-
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -44,7 +44,7 @@ def get_activation_fn(
         if activation == "tanh":
             return nn.Tanh()
         elif activation == "gelu":
-            return nn.GELU()
+            return GELU()
         elif activation == "relu":
             return nn.ReLU()
         elif activation == "glu":
@@ -63,6 +63,14 @@ def get_activation_fn(
         f"Activation must be a string or a PyTorch module, got {type(activation)}"
     )
 
+class GELU(nn.Module):
+    """
+    GELU activation function from original ESM repo. 
+    Using F.gelu yields subtly wrong results.
+    """
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0)))
 
 class SwiGLU(nn.Module):
     """
@@ -102,9 +110,6 @@ class SwiGLU(nn.Module):
         The SwiGLU activation of the input tensor.
 
     """
-
-    def __init__(self):
-        super().__init__()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         value, gate = x.chunk(2, dim=-1)
