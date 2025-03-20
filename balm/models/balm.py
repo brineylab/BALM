@@ -355,10 +355,10 @@ class BalmForSequenceClassification(
         attention_mask: Optional[torch.BoolTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        labels: Optional[torch.Tensor] = None,
     ) -> Union[SequenceClassifierOutput, tuple]:
         """
         Forward pass
@@ -371,11 +371,21 @@ class BalmForSequenceClassification(
         attention_mask: torch.BoolTensor
             Attention mask
 
-        key_padding_mask: torch.BoolTensor
-            Key padding mask
+        position_ids: torch.LongTensor
+            Position IDs, of shape (batch_size, sequence_length).
+
+        inputs_embeds: torch.FloatTensor
+            Input embeddings, of shape (batch_size, sequence_length, hidden_size). Cannot be provided
+            if `input_ids` is also provided.
 
         labels: torch.LongTensor
             Labels
+
+        output_attentions: bool
+            Whether to output attention weights
+
+        output_hidden_states: bool
+            Whether to output hidden states
 
         return_dict: bool
             Whether to return a dictionary of outputs (returns a tuple if False)

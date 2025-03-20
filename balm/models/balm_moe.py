@@ -97,8 +97,12 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
             tokens should be ignored for attention purposes. If float, it is added to the attention
             scores.
 
-        key_padding_mask: torch.BoolTensor
-            Key padding mask. Not used (use attention_mask instead)
+        position_ids: torch.LongTensor
+            Position IDs, of shape (batch_size, sequence_length).
+
+        inputs_embeds: torch.FloatTensor
+            Input embeddings, of shape (batch_size, sequence_length, hidden_size). Cannot be provided
+            if `input_ids` is also provided.
 
         output_attentions: bool
             Whether to output attention weights
@@ -295,6 +299,8 @@ class BalmMoEForMaskedLM(
         self,
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -313,8 +319,12 @@ class BalmMoEForMaskedLM(
         attention_mask: torch.BoolTensor
             Attention mask
 
-        key_padding_mask: torch.BoolTensor
-            Key padding mask. Not used (use attention_mask instead)
+        position_ids: torch.LongTensor
+            Position IDs, of shape (batch_size, sequence_length).
+
+        inputs_embeds: torch.FloatTensor
+            Input embeddings, of shape (batch_size, sequence_length, hidden_size). Cannot be provided
+            if `input_ids` is also provided.
 
         labels: torch.LongTensor
             Labels
@@ -351,6 +361,8 @@ class BalmMoEForMaskedLM(
         outputs = self.balm(
             input_ids,
             attention_mask=attention_mask,
+            position_ids=position_ids,
+            inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             output_router_logits=output_router_logits,
@@ -451,6 +463,8 @@ class BalmMoEForSequenceClassification(
         self,
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -469,8 +483,12 @@ class BalmMoEForSequenceClassification(
         attention_mask: torch.BoolTensor
             Attention mask
 
-        key_padding_mask: torch.BoolTensor
-            Key padding mask
+        position_ids: torch.LongTensor
+            Position IDs, of shape (batch_size, sequence_length).
+
+        inputs_embeds: torch.FloatTensor
+            Input embeddings, of shape (batch_size, sequence_length, hidden_size). Cannot be provided
+            if `input_ids` is also provided.
 
         labels: torch.LongTensor
             Labels
@@ -501,6 +519,8 @@ class BalmMoEForSequenceClassification(
         outputs = self.balm(
             input_ids,
             attention_mask=attention_mask,
+            position_ids=position_ids,
+            inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             output_router_logits=output_router_logits,
