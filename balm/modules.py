@@ -291,9 +291,6 @@ class SparseFFN(nn.Module):
     ffn_dim: int, default=None
         Feed-forward network dimension. If not provided, it will be set to 4x the model dimension.
 
-    expert_activation: str, default="swiglu"
-        Activation function to use.
-
     expert_bias: bool, default=True
         Whether to use bias in the expert FFN.
 
@@ -315,6 +312,18 @@ class SparseFFN(nn.Module):
     
     router_bias: bool, default=False
         Whether to use bias in the router.
+    
+    router_dtype: torch.dtype
+        Data type to use for softmax of the router.
+
+    router_jitter: float
+        Jitter to apply to inputs of the router.
+
+    expert_activation: str, default="swiglu"
+        Activation function to use.
+    
+    expert_bias: bool, default=True
+        Whether to use bias in the experts.
 
     Input shape: (batch_size, seq_len, model_dim)
     Output shape: (batch_size, seq_len, model_dim)
@@ -324,14 +333,16 @@ class SparseFFN(nn.Module):
         self,
         model_dim: int,
         ffn_dim: int,
-        expert_bias: bool = True,
-        expert_activation: str = "swiglu",
         num_experts: int,
         expert_capacity_type: str,
         expert_capacity: Union[int, float],
         k: int = 1,
         router_type: str = "topk",
         router_bias: bool = False,
+        router_dtype: torch.dtype = torch.float32,
+        router_jitter: float = 0.0,
+        expert_activation: str = "swiglu",
+        expert_bias: bool = True,
     ):
         super().__init__()
         
@@ -341,13 +352,17 @@ class SparseFFN(nn.Module):
             self.router = TopKRouter(
                 d_model=model_dim, 
                 num_experts=num_experts,
-                router_bias=router_bias
+                router_bias=router_bias,
+                router_dtype=router_dtype,
+                router_jitter=router_jitter
             )
         elif router_type == "expert choice":
             self.router = ExpertChoiceRouter(
                 d_model=model_dim, 
                 num_experts=num_experts,
-                router_bias=router_bias
+                router_bias=router_bias,
+                router_dtype=router_dtype,
+                router_jitter=router_jitter
             )
         else:
             raise ValueError(f"Invalid router type: {router_type}")
@@ -735,6 +750,8 @@ class SparseTransformerLayer(nn.Module):
             k=config.num_experts_per_tok,
             router_type=config.router_type,
             router_bias=config.router_bias,
+            router_dtype=config.router_dtype,
+            router_jitter=config.router_jitter,
         )
         self.ffn_dropout = nn.Dropout(config.expert_dropout)
 

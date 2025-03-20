@@ -4,6 +4,7 @@
 
 from typing import Optional, Union
 
+import torch
 from transformers import PretrainedConfig
 
 
@@ -72,6 +73,13 @@ class BalmMoEConfig(PretrainedConfig):
     router_type : str, default="topk"
         The type of router to use.
         Options are "topk" or "expert choice".
+    
+    router_dtype : str, default="float32"
+        Data type of the router tensors, that is converted to torch.dtype.
+        Options are "float32", "float16", or "bfloat16".
+    
+    router_jitter: float, default=0.0
+        Jitter to apply to inputs of the router.
 
     expert_capacity_type : str, default="multiplier"
         The type of expert capacity to use.
@@ -169,8 +177,8 @@ class BalmMoEConfig(PretrainedConfig):
         alternate_sparsity: bool = True,
         # router
         router_type: str = "topk", 
-        router_dtype: str = "float32", # TODO
-        router_jitter: float = 0.0, # TODO
+        router_dtype: str = "float32",
+        router_jitter: float = 0.0,
         router_bias: bool = False,
         # router losses
         router_aux_loss_coef: float = 0.01,
@@ -239,7 +247,7 @@ class BalmMoEConfig(PretrainedConfig):
         self.num_shared_experts = int(num_shared_experts)
         self.num_experts_per_tok = int(num_experts_per_tok)
         self.router_type = self._standardize_router_type(router_type)
-        self.router_dtype = router_dtype.lower()
+        self.router_dtype = self._str_to_dtype(router_dtype.lower())
         self.router_jitter = float(router_jitter)
         self.router_bias = bool(router_bias)
         self.expert_capacity_type = expert_capacity_type.lower()
@@ -300,3 +308,15 @@ class BalmMoEConfig(PretrainedConfig):
             raise ValueError(
                 f"Invalid router type: {router_type}. Options are 'topk' or 'expert choice'."
             )
+    
+    def _str_to_dtype(self, dtype_str: str) -> torch.dtype:
+        dtype_mapping = {
+            "float32": torch.float32,
+            "float16": torch.float16,
+            "bfloat16": torch.bfloat16,
+        }
+        
+        if dtype_str not in dtype_mapping:
+            raise ValueError(f"Invalid dtype string: {dtype_str}. Choose from {list(dtype_mapping.keys())}")
+
+        return dtype_mapping[dtype_str]
