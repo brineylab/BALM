@@ -35,15 +35,14 @@ class BalmMoEConfig(PretrainedConfig):
         The dropout probability for the model. Can be overridden
         by `attention_dropout`, `hidden_dropout`, and `expert_dropout`.
 
-    attention_dropout : float, default=0.1
+    attention_dropout : float
         The dropout probability for the attention layers.
 
-    hidden_dropout : float, default=0.1
+    hidden_dropout : float
         The dropout probability for the hidden layers.
     
     ffn_bias : bool, default=True
-        Whether to use a bias for FFN layers.
-        In MoE models this is the bias in the experts.
+        Whether to use a bias for FFN layers. Used in DenseTransformerLayers only.
 
     max_position_embeddings : int, default=320
         The maximum position embeddings.
@@ -88,8 +87,11 @@ class BalmMoEConfig(PretrainedConfig):
         The activation function to use for the experts.
         Options are "swiglu", "relu", "gelu".
 
-    expert_dropout : float, default=0.1
+    expert_dropout : float
         The dropout probability for the expert layers.
+    
+    expert_bias : bool, default=True
+        Whether to use a bias in expert FFN layers. Used in SparseTransformerLayers only.
 
     alternate_sparsity : bool, default=True
         Whether to use alternate sparse and dense layers.
@@ -159,22 +161,26 @@ class BalmMoEConfig(PretrainedConfig):
         position_embedding_type: str = "rotary",
         mask_token_id: int = 31,
         pad_token_id: int = 1,
-        # MoE params
+
+        ## MoE params
         num_experts: int = 8,
-        num_shared_experts: int = 0,
+        num_shared_experts: int = 0, # TODO
         num_experts_per_tok: int = 1,  # k for top-k routing (to comply with 🤗 naming)
-        router_type: str = "topk",  # "topk" or "expert choice"
-        router_dtype: str = "float32",
-        router_jitter: float = 0.0,
+        alternate_sparsity: bool = True,
+        # router
+        router_type: str = "topk", 
+        router_dtype: str = "float32", # TODO
+        router_jitter: float = 0.0, # TODO
         router_bias: bool = False,
-        expert_capacity_type: str = "multiplier",  # "absolute" or "multiplier"
+        # router losses
+        router_aux_loss_coef: float = 0.01,
+        router_z_loss_coef: float = 0.001,
+        # experts
+        expert_capacity_type: str = "multiplier",
         expert_capacity: Union[int, float] = 1,
         expert_activation: str = "gelu",
         expert_dropout: Optional[float] = None,
-        alternate_sparsity: bool = True,
-        # router losses
-        router_aux_loss_coef: float = 0.01,  # coefficient for aux loss (load balancing, top-k only)
-        router_z_loss_coef: float = 0.001,  # coefficient for z-loss
+        expert_bias: bool = True,
         # mlm
         mlm_activation: str = "gelu",
         # classification
@@ -242,6 +248,7 @@ class BalmMoEConfig(PretrainedConfig):
         self.expert_dropout = float(
             expert_dropout if expert_dropout is not None else dropout
         )
+        self.expert_bias = bool(expert_bias)
         self.alternate_sparsity = bool(alternate_sparsity)
 
         # router losses

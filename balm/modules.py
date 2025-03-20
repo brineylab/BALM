@@ -291,11 +291,11 @@ class SparseFFN(nn.Module):
     ffn_dim: int, default=None
         Feed-forward network dimension. If not provided, it will be set to 4x the model dimension.
 
-    activation: str, default="swiglu"
+    expert_activation: str, default="swiglu"
         Activation function to use.
 
-    bias: bool, default=True
-        Whether to use bias.
+    expert_bias: bool, default=True
+        Whether to use bias in the expert FFN.
 
     num_experts: int
         Number of experts.
@@ -304,14 +304,17 @@ class SparseFFN(nn.Module):
         The type of expert capacity to use. 
         If "absolute": tokens per expert; if "multiplier": capacity = multiplier * max_position_embeddings
 
-    max_capacity: Union[int, float]
+    expert_capacity: Union[int, float]
         Expert capacity, either absolute or multiplier based on expert_capacity_type
 
     k: int, default=1
-        Number of experts per token.
+        Number of experts per token. Used in "topk" routing only. 
 
     router_type: str, default="topk"
         Router type. Options are "topk" or "expert choice".
+    
+    router_bias: bool, default=False
+        Whether to use bias in the router.
 
     Input shape: (batch_size, seq_len, model_dim)
     Output shape: (batch_size, seq_len, model_dim)
@@ -321,39 +324,49 @@ class SparseFFN(nn.Module):
         self,
         model_dim: int,
         ffn_dim: int,
+        expert_bias: bool = True,
+        expert_activation: str = "swiglu",
         num_experts: int,
         expert_capacity_type: str,
-        max_capacity: Union[int, float],
+        expert_capacity: Union[int, float],
         k: int = 1,
         router_type: str = "topk",
-        activation: str = "swiglu",
-        bias: bool = True,
+        router_bias: bool = False,
     ):
         super().__init__()
+        
         # router
         self.router_type = router_type
         if router_type == "topk":
-            self.router = TopKRouter(model_dim, num_experts)
+            self.router = TopKRouter(
+                d_model=model_dim, 
+                num_experts=num_experts,
+                router_bias=router_bias
+            )
         elif router_type == "expert choice":
-            self.router = ExpertChoiceRouter(model_dim, num_experts)
+            self.router = ExpertChoiceRouter(
+                d_model=model_dim, 
+                num_experts=num_experts,
+                router_bias=router_bias
+            )
         else:
             raise ValueError(f"Invalid router type: {router_type}")
 
         # experts
-        if activation.lower() == "swiglu":
+        if expert_activation.lower() == "swiglu":
             expert = partial(
                 SwigluFFN,
                 model_dim=model_dim,
                 ffn_dim=ffn_dim,
-                bias=bias,
+                bias=expert_bias,
             )
         else:
             expert = partial(
                 DenseFFN,
                 model_dim=model_dim,
                 ffn_dim=ffn_dim,
-                bias=bias,
-                activation=activation,
+                bias=expert_bias,
+                activation=expert_activation,
             )
         self.experts = nn.ModuleList([expert() for _ in range(num_experts)])
         self.num_experts = num_experts
@@ -361,10 +374,10 @@ class SparseFFN(nn.Module):
 
         # capacity
         if expert_capacity_type == "multiplier":
-            self.capacity_multiplier = max_capacity
+            self.capacity_multiplier = expert_capacity
             self.absolute_capacity = None
         else:
-            self.absolute_capacity = max_capacity
+            self.absolute_capacity = expert_capacity
             self.capacity_multiplier = None
 
     def _compute_capacity(self, num_tokens: int) -> int:
@@ -714,15 +727,16 @@ class SparseTransformerLayer(nn.Module):
         self.sparse_ffn = SparseFFN(
             model_dim=config.hidden_size,
             ffn_dim=config.intermediate_size,
+            expert_activation=config.expert_activation,
+            expert_bias=config.expert_bias,
             num_experts=config.num_experts,
             expert_capacity_type=config.expert_capacity_type,
-            max_capacity=config.expert_capacity,
+            expert_capacity=config.expert_capacity,
             k=config.num_experts_per_tok,
             router_type=config.router_type,
-            activation=config.activation,
-            bias=config.ffn_bias,
+            router_bias=config.router_bias,
         )
-        self.ffn_dropout = nn.Dropout(config.hidden_dropout)
+        self.ffn_dropout = nn.Dropout(config.expert_dropout)
 
     def forward(
         self,

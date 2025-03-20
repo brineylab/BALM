@@ -35,6 +35,8 @@ class TopKRouter(nn.Module):
         Token embedding dimension
     num_experts: int
         Number of available experts
+    router_bias: bool
+        Whether to use bias
 
     Input shape: (num_tokens, d_model)
 
@@ -55,11 +57,21 @@ class TopKRouter(nn.Module):
         https://arxiv.org/abs/2401.06066
     """
 
-    def __init__(self, d_model: int, num_experts: int):
+    def __init__(
+        self, 
+        d_model: int, 
+        num_experts: int,
+        router_bias: bool,
+    ):
         super().__init__()
-        self.linear = nn.Linear(d_model, num_experts)
+        self.linear = nn.Linear(d_model, num_experts, bias=router_bias)
 
-    def forward(self, x: torch.Tensor, k: int, expert_capacity: int):
+    def forward(
+        self, 
+        x: torch.Tensor, 
+        k: int, 
+        expert_capacity: int
+    ):
         """
         x: (num_tokens, d_model)
         k: how many experts each token chooses
@@ -76,9 +88,17 @@ class TopKRouter(nn.Module):
         # select top-k experts for each token ==> (num_tokens, k)
         topk_probs, topk_expert_ids = torch.topk(probs, k, dim=-1)
 
+        print(topk_probs)
+        print(topk_expert_ids)
+
         # flatten top-k expert IDs and probs ==> (num_tokens * k)
         flat_expert_ids = topk_expert_ids.reshape(-1)
         flat_probs = topk_probs.reshape(-1)
+
+        expert_counts = torch.bincount(flat_expert_ids, minlength=num_experts)
+        print(f"Expert assignment count: {expert_counts}")
+
+        raise Exception()
 
         # we also need the original token ids that correspond to each slot
         # in flattened form: e.g. 0..(num_tokens-1) repeated k times ==> (num_tokens * k)
@@ -140,6 +160,8 @@ class ExpertChoiceRouter(nn.Module):
         Token embedding dimension
     num_experts: int
         Number of available experts
+    router_bias: bool
+        Whether to use bias
 
     Input shape: (num_tokens, d_model)
 
@@ -155,13 +177,22 @@ class ExpertChoiceRouter(nn.Module):
 
     """
 
-    def __init__(self, d_model: int, num_experts: int):
+    def __init__(
+        self, 
+        d_model: int, 
+        num_experts: int,
+        router_bias: bool,
+    ):
         super().__init__()
-        self.linear = nn.Linear(d_model, num_experts)
+        self.linear = nn.Linear(d_model, num_experts, bias=router_bias)
 
     def forward(
-        self, x: torch.Tensor, k: int, expert_capacity: int
+        self, 
+        x: torch.Tensor, 
+        k: int, 
+        expert_capacity: int
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        
         logits = self.linear(x)  # (num_tokens, num_experts)
         probs = F.softmax(logits, dim=0)
         expert_probs, expert_indices = torch.topk(probs, k=expert_capacity, dim=0)
