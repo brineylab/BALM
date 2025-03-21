@@ -339,7 +339,7 @@ class SparseFFN(nn.Module):
         k: int = 1,
         router_type: str = "topk",
         router_bias: bool = False,
-        router_dtype: torch.dtype = torch.float32,
+        router_dtype: str = "float32",
         router_jitter: float = 0.0,
         expert_activation: str = "swiglu",
         expert_bias: bool = True,

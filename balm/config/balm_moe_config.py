@@ -247,7 +247,7 @@ class BalmMoEConfig(PretrainedConfig):
         self.num_shared_experts = int(num_shared_experts)
         self.num_experts_per_tok = int(num_experts_per_tok)
         self.router_type = self._standardize_router_type(router_type)
-        self.router_dtype = self._str_to_dtype(router_dtype.lower())
+        self.router_dtype = router_dtype.lower()
         self.router_jitter = float(router_jitter)
         self.router_bias = bool(router_bias)
         self.expert_capacity_type = expert_capacity_type.lower()
@@ -308,15 +308,3 @@ class BalmMoEConfig(PretrainedConfig):
             raise ValueError(
                 f"Invalid router type: {router_type}. Options are 'topk' or 'expert choice'."
             )
-    
-    def _str_to_dtype(self, dtype_str: str) -> torch.dtype:
-        dtype_mapping = {
-            "float32": torch.float32,
-            "float16": torch.float16,
-            "bfloat16": torch.bfloat16,
-        }
-        
-        if dtype_str not in dtype_mapping:
-            raise ValueError(f"Invalid dtype string: {dtype_str}. Choose from {list(dtype_mapping.keys())}")
-
-        return dtype_mapping[dtype_str]

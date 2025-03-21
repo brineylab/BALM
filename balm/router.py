@@ -70,11 +70,11 @@ class TopKRouter(nn.Module):
         d_model: int, 
         num_experts: int,
         router_bias: bool,
-        router_dtype: torch.dtype,
+        router_dtype: str,
         router_jitter: float,
     ):
         super().__init__()
-        self.router_dtype = router_dtype
+        self.router_dtype = _str_to_dtype(router_dtype)
         self.router_jitter = router_jitter
 
         self.linear = nn.Linear(d_model, num_experts, bias=router_bias)
@@ -205,11 +205,11 @@ class ExpertChoiceRouter(nn.Module):
         d_model: int, 
         num_experts: int,
         router_bias: bool,
-        router_dtype: torch.dtype,
+        router_dtype: str,
         router_jitter: float
     ):
         super().__init__()
-        self.router_dtype = router_dtype
+        self.router_dtype = _str_to_dtype(router_dtype)
         self.router_jitter = router_jitter
 
         self.linear = nn.Linear(d_model, num_experts, bias=router_bias)
@@ -238,3 +238,15 @@ class ExpertChoiceRouter(nn.Module):
         expert_probs = expert_probs.to(x.dtype)
 
         return logits, probs, expert_probs.T, expert_indices.T
+
+def _str_to_dtype(dtype_str: str) -> torch.dtype:
+    dtype_mapping = {
+        "float32": torch.float32,
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+    }
+    
+    if dtype_str not in dtype_mapping:
+        raise ValueError(f"Invalid dtype string: {dtype_str}. Choose from {list(dtype_mapping.keys())}")
+
+    return dtype_mapping[dtype_str]
