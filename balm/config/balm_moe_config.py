@@ -193,6 +193,7 @@ class BalmMoEConfig(PretrainedConfig):
         mlm_activation: str = "gelu",
         # classification
         classifier_activation: str = "tanh",
+        classification_freeze_base: bool = True,
         num_labels: int = 2,  # sequence/token-level classification
         num_choices: int = 4,  # multiple choice classification
         # outputs
@@ -233,6 +234,7 @@ class BalmMoEConfig(PretrainedConfig):
         self.num_labels = int(num_labels)
         self.num_choices = int(num_choices)
         self.classifier_activation = classifier_activation.lower()
+        self.classification_freeze_base = bool(classification_freeze_base)
         self.mlm_activation = mlm_activation.lower()
 
         # outputs

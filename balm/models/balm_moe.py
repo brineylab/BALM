@@ -452,8 +452,19 @@ class BalmMoEForSequenceClassification(
         # loss function
         self.criterion = nn.CrossEntropyLoss()
 
+        # router loss coefficients
+        # set as attributes (rather than using the config values directly)
+        # so that we can zero them out in freeze_base_model() if necessary
+        self.router_z_loss_coef = self.config.router_z_loss_coef
+        self.router_aux_loss_coef = self.config.router_aux_loss_coef
+
         # initialize weights
         self.init_weights()
+
+        # freeze base model weights
+        # and zero out router loss coeffs
+        if config.classification_freeze_base:
+            self.freeze_base_model()
 
     def forward(
         self,
@@ -528,8 +539,8 @@ class BalmMoEForSequenceClassification(
         # classifier
         classifier_logits = self.classifier(x)
 
-        # classification loss
-        classifier_loss = None
+        # loss
+        loss, z_loss, aux_loss, classifier_loss = None, None, None, None
         if labels is not None:
             labels = labels.to(classifier_logits.device)
             classifier_loss = self.criterion(
@@ -537,25 +548,41 @@ class BalmMoEForSequenceClassification(
                 labels.view(-1),
             )
 
+            # router loss(es)
+            # if the base model is frozen (default), both router coeffs are zeroed out
+            z_loss = self.router_z_loss_coef * (outputs.z_loss)
+            if self.config.router_type == "expert choice":
+                loss = classifier_loss + z_loss
+                aux_loss = None
+            else:
+                aux_loss = self.router_aux_loss_coef * (outputs.aux_loss)
+                loss = classifier_loss + z_loss + aux_loss
+
         # outputs
         if not return_dict:
             return tuple(
                 v
                 for v in [
-                    classifier_loss,
+                    loss,
                     classifier_logits,
                     outputs.hidden_states,
                     outputs.attentions,
                     outputs.router_logits,
                     outputs.expert_indexes,
+                    aux_loss,
+                    z_loss,
+                    classifier_loss,
                 ]
                 if v is not None
             )
         return MoESequenceClassifierOutput(
-            loss=classifier_loss,
+            loss=loss,
             logits=classifier_logits,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
             router_logits=outputs.router_logits,
             expert_indexes=outputs.expert_indexes,
+            z_loss=z_loss,
+            aux_loss=aux_loss,
+            classifier_loss=classifier_loss,
         )
