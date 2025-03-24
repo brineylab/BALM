@@ -98,8 +98,8 @@ class BalmSequenceClassificationHead(nn.Module):
     ):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-        self.dropout = nn.Dropout(config.classifier_dropout)
-        self.out_proj = nn.Linear(self.hidden_size, self.num_labels)
+        self.dropout = nn.Dropout(config.hidden_dropout)
+        self.out_proj = nn.Linear(config.hidden_size, config.num_labels)
 
         # activation
         self.activation = get_activation_fn(config.classifier_activation)

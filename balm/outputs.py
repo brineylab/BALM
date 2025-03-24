@@ -216,15 +216,6 @@ class MoESequenceClassifierOutput(BalmModelOutput):
     logits : torch.FloatTensor
         The output tensor. The shape is (batch_size, num_labels).
 
-    z_loss : torch.FloatTensor
-        The z loss tensor. The shape is (1,).
-
-    aux_loss : torch.FloatTensor
-        The auxiliary loss tensor. The shape is (1,).
-
-    classifier_loss : torch.FloatTensor
-        The classifier loss tensor. The shape is (1,).
-
     hidden_states : Optional[Tuple[torch.FloatTensor, ...]]
         The hidden states tensor. The shape is (batch_size, sequence_length, hidden_size).
 
@@ -243,8 +234,5 @@ class MoESequenceClassifierOutput(BalmModelOutput):
     logits: torch.FloatTensor = None
     hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
     attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
-    z_loss: torch.FloatTensor = None
-    aux_loss: torch.FloatTensor = None
     router_logits: Optional[Tuple[torch.FloatTensor]] = None
     expert_indexes: Optional[Tuple[torch.LongTensor]] = None
-    classifier_loss: torch.FloatTensor = None

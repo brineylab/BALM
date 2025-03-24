@@ -452,10 +452,6 @@ class BalmMoEForSequenceClassification(
         # loss function
         self.criterion = nn.CrossEntropyLoss()
 
-        # router loss coefficients
-        self.router_z_loss_coef = self.config.router_z_loss_coef
-        self.router_aux_loss_coef = self.config.router_aux_loss_coef
-
         # initialize weights
         self.init_weights()
 
@@ -541,44 +537,25 @@ class BalmMoEForSequenceClassification(
                 labels.view(-1),
             )
 
-            # router loss(es)
-            z_loss = self.router_z_loss_coef * (outputs.z_loss)
-            if self.config.router_type == "expert choice":
-                loss = classifier_loss + z_loss
-                aux_loss = None
-            else:
-                aux_loss = self.router_aux_loss_coef * (outputs.aux_loss)
-                loss = classifier_loss + z_loss + aux_loss
-        else:
-            loss = None
-            z_loss = None
-            aux_loss = None
-
         # outputs
         if not return_dict:
             return tuple(
                 v
                 for v in [
-                    loss,
+                    classifier_loss,
                     classifier_logits,
                     outputs.hidden_states,
                     outputs.attentions,
                     outputs.router_logits,
                     outputs.expert_indexes,
-                    aux_loss,
-                    z_loss,
-                    classifier_loss,
                 ]
                 if v is not None
             )
         return MoESequenceClassifierOutput(
-            loss=loss,
+            loss=classifier_loss,
             logits=classifier_logits,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
             router_logits=outputs.router_logits,
             expert_indexes=outputs.expert_indexes,
-            z_loss=z_loss,
-            aux_loss=aux_loss,
-            classifier_loss=classifier_loss,
         )
