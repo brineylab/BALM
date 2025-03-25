@@ -460,19 +460,21 @@ class SparseFFN(nn.Module):
             expert_capacity=capacity,
         )
 
-        # TODO: parallelize this?? looping through experts seems incorrect
-        output = torch.zeros_like(x_flat)
+        # clone hidden states and only update selected token states
+        output = x_flat.clone()
         for expert_idx, expert in enumerate(self.experts):
-            # get token indices and probs for current expert
-            token_indices = expert_indices[expert_idx]  # ==> (expert_capacity,)
-            token_probs = expert_probs[expert_idx]  # ==> (expert_capacity,)
+            # get token indices and probs for current expert ==> (expert_capacity,)
+            token_indices = expert_indices[expert_idx]
+            token_probs = expert_probs[expert_idx]
             
             # remove tokens that were not selected
             # (in undersubscribed experts, empty slots are filled with -1)
             valid_token_mask = token_indices >= 0
             valid_token_indices = token_indices[valid_token_mask]
             valid_token_probs = token_probs[valid_token_mask]
-            if valid_token_indices.numel() == 0:  # no valid tokens for this expert
+
+            # no valid tokens for this expert
+            if valid_token_indices.numel() == 0:
                 continue
             
             # get expert input and weights
@@ -480,6 +482,7 @@ class SparseFFN(nn.Module):
             weights = valid_token_probs
             
             # compute expert output
+            # scale output by routing probability
             expert_output = expert(expert_input) * weights.unsqueeze(1)
             
             # accumulate expert output

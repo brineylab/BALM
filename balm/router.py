@@ -130,9 +130,24 @@ class TopKRouter(BaseRouter):
 
         # select top-k experts for each token ==> (num_tokens, k)
         topk_probs, topk_expert_ids = torch.topk(probs, k, dim=-1)
+        topk_probs /= topk_probs.sum(dim=-1, keepdim=True) # normalize probs to sum to 1
 
         # convert back to original dtype
         topk_probs = topk_probs.to(x.dtype)
+
+        # TODO
+        # mask padding tokens
+        # if padding_mask is not None:
+        #     topk_expert_ids = topk_expert_ids[~padding_mask]
+        #     topk_probs = topk_probs[~padding_mask]
+
+        #     # generate token ids for below
+        #     token_ids = torch.arange(num_tokens, device=x.device)[~padding_mask]
+        #     num_tokens = len(token_ids)
+        # else:
+        #     # generate token ids for below
+        #     token_ids = torch.arange(num_tokens, device=x.device)
+
 
         # flatten top-k expert IDs and probs ==> (num_tokens * k)
         flat_expert_ids = topk_expert_ids.reshape(-1)
@@ -146,11 +161,6 @@ class TopKRouter(BaseRouter):
             .expand(num_tokens, k)
             .reshape(-1)
         )
-
-        # TODO
-        # mask padding tokens
-        if padding_mask is not None:
-            pass
 
         # initalize empty tensors for results
         expert_probs = torch.zeros(
