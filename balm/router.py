@@ -12,25 +12,11 @@ from transformers import PretrainedConfig
 
 __all__ = ["TopKRouter", "ExpertChoiceRouter"]
 
-
-class TopKRouter(nn.Module):
+class BaseRouter(nn.Module):
     """
-    Router that implements the "token choice of top-k experts" strategy. For example, if k=1, this
-    replicates the top-1 routing strategy introduced in the `Switch Transformers`_ paper.
-    Alternatively, if k=2, this replicates the top-2 routing strategy introduced in the `GShard`_
-    paper. Tokens are routed to their expert of choice until the expert's `expert_capacity` is
-    reached. Shared experts, which process all tokens, are implemented as described in the
-    `DeepSeqMoE`_ paper. Higher router precision and input jitter, introduced in the `Switch 
-    Transformers`_ paper, is modeled on the `Mixtral`_ implementation.
+    Base class for MoE routers, handling initialization and dtype conversion.
 
-    .. note::
-        There is no guarantee that each token will be processed by an expert,
-        or that every expert will receive at least one token.
-
-    If tokens are routed to an expert which is above capacity, they are not processed by any expert
-    and their hidden states are passed to the subsequent layer unchanged.
-
-    Parameters:
+    Attributes:
     -----------
     d_model: int
         Token embedding dimension
@@ -43,14 +29,49 @@ class TopKRouter(nn.Module):
     router_jitter: float
         Jitter to apply to inputs.
 
-    Input shape: (num_tokens, d_model)
+    """
+    def __init__(
+        self, 
+        d_model: int, 
+        num_experts: int,
+        router_bias: bool,
+        router_dtype: str,
+        router_jitter: float,
+    ):
+        super().__init__()
+        self.router_dtype = self._str_to_dtype(router_dtype)
+        self.router_jitter = router_jitter
+        self.linear = nn.Linear(d_model, num_experts, bias=router_bias)
 
-    Returns:
-    --------
-    logits: (num_tokens, num_experts) routing scores
-    probs: (num_tokens, num_experts) routing probabilities
-    expert_probs: (num_experts, expert_capacity) expert-selected token probabilities
-    expert_indices: (num_experts, expert_capacity) selected token indices
+    def _str_to_dtype(self, dtype_str: str) -> torch.dtype:
+        dtype_mapping = {
+            "float32": torch.float32,
+            "float16": torch.float16,
+            "bfloat16": torch.bfloat16,
+        }
+        
+        if dtype_str not in dtype_mapping:
+            raise ValueError(f"Invalid dtype string: {dtype_str}. Choose from {list(dtype_mapping.keys())}")
+        
+        return dtype_mapping[dtype_str]
+
+class TopKRouter(BaseRouter):
+    """
+    Router that implements the "token choice of top-k experts" strategy. For example, if k=1, this
+    replicates the top-1 routing strategy introduced in the `Switch Transformers`_ paper.
+    Alternatively, if k=2, this replicates the top-2 routing strategy introduced in the `GShard`_
+    paper. Tokens are routed to their expert of choice until the expert's `expert_capacity` is
+    reached. Shared experts, which process all tokens, are implemented as described in the
+    `DeepSeqMoE`_ paper. Input jitter and high router precision is modeled on the 'Switch Transformers`_ 
+    implementation. 
+
+    .. note::
+        There is no guarantee that each token will be processed by an expert,
+        or that every expert will receive at least one token.
+
+        If tokens are routed to an expert which is above capacity, they are not processed by any expert
+        and their hidden states are passed to the subsequent layer unchanged.
+
 
     .. _Switch Transformers:
         https://arxiv.org/abs/2101.03961
@@ -61,34 +82,37 @@ class TopKRouter(nn.Module):
     .. _DeepSeqMoE:
         https://arxiv.org/abs/2401.06066
     
-    .. _Mixtral HuggingFace Code:
-        https://github.com/huggingface/transformers/blob/main/src/transformers/models/mixtral/modeling_mixtral.py#L86
     """
-
-    def __init__(
-        self, 
-        d_model: int, 
-        num_experts: int,
-        router_bias: bool,
-        router_dtype: str,
-        router_jitter: float,
-    ):
-        super().__init__()
-        self.router_dtype = _str_to_dtype(router_dtype)
-        self.router_jitter = router_jitter
-
-        self.linear = nn.Linear(d_model, num_experts, bias=router_bias)
-
     def forward(
         self, 
         x: torch.Tensor, 
+        padding_mask: torch.Tensor,
         k: int, 
         expert_capacity: int
     ):
         """
-        x: (num_tokens, d_model)
-        k: how many experts each token chooses
-        expert_capacity: how many tokens each expert keeps
+        Parameters:
+        -----------
+        x : torch.Tensor
+            Shape: `(num_tokens, d_model)`. Input token representations.
+        padding_mask : Optional[torch.Tensor]
+            Shape: `(batch_size, seq_len)`. Boolean mask for padded tokens (not yet applied).
+        k : int
+            Maximum number of experts each token can choose.
+        expert_capacity : int
+            Maximum number of tokens each expert can process.
+
+        Returns:
+        --------
+        logits : torch.Tensor
+            Raw routing scores `(num_tokens, num_experts)`.
+        probs : torch.Tensor
+            Routing probabilities `(num_tokens, num_experts)`.
+        expert_probs : torch.Tensor
+            Selected token probabilities for each expert `(num_experts, expert_capacity)`.
+        expert_indices : torch.Tensor
+            Token indices assigned to each expert `(num_experts, expert_capacity)`.
+
         """
         num_tokens = x.size(0)
         num_experts = self.linear.out_features
@@ -100,7 +124,9 @@ class TopKRouter(nn.Module):
 
         # compute routing logits and probs ==> (num_tokens, num_experts)
         logits = self.linear(x)
-        probs = F.softmax(logits, dim=-1, dtype=self.router_dtype) # softmax in higher precision (fp32 for stability)
+
+        # softmax in higher precision (fp32 for stability)
+        probs = F.softmax(logits, dim=-1, dtype=self.router_dtype)
 
         # select top-k experts for each token ==> (num_tokens, k)
         topk_probs, topk_expert_ids = torch.topk(probs, k, dim=-1)
@@ -121,19 +147,21 @@ class TopKRouter(nn.Module):
             .reshape(-1)
         )
 
-        # for each expert, pick up to 'expert_capacity' tokens
-        # in order of highest expert affiniy
+        # TODO
+        # mask padding tokens
+        if padding_mask is not None:
+            pass
+
+        # initalize empty tensors for results
         expert_probs = torch.zeros(
             (num_experts, expert_capacity), dtype=probs.dtype, device=probs.device
         )
         expert_indices = torch.full(
-            (num_experts, expert_capacity),
-            fill_value=-1,
-            dtype=torch.long,
-            device=probs.device,
+            (num_experts, expert_capacity), fill_value=-1, dtype=torch.long, device=probs.device,
         )
 
-        # loop over experts, grouping slots that picked each expert.
+        # for each expert, pick up to 'expert_capacity' tokens in order of highest expert affiniy
+        # loop over experts, grouping slots that picked each expert
         for e in range(num_experts):
             mask = flat_expert_ids == e
             chosen_token_ids = flat_token_ids[mask]
@@ -150,77 +178,61 @@ class TopKRouter(nn.Module):
         return logits, probs, expert_probs, expert_indices
 
 
-class ExpertChoiceRouter(nn.Module):
+class ExpertChoiceRouter(BaseRouter):
     """
     This router uses the "expert choice of top-k tokens" strategy, as originally described
     in the `Mixture-of-Experts with Expert Choice Routing`_ paper. This automatically
     balances the number of tokens processed by each expert, and eliminates the
-    need for an auxiliary (load-balancing) router loss. Higher router precision and input jitter, 
-    introduced in the `Switch Transformers`_ paper, is modeled on the `Mixtral`_ implementation.
+    need for an auxiliary (load-balancing) router loss. Input jitter and high router precision 
+    is modeled on the 'Switch Transformers`_ implementation. 
 
     .. note::
         There is no guarantee that each token will be processed by an expert. In fact,
         one of the primary benefits of expert choice routing is thought to be their
         ability to heterogeneously devote computation to a subset of highly complex/difficult
         tokens.
-
-    If tokens are not selected by an expert, their hidden states are passed to the
-    subsequent layer unchanged.
-
-    Parameters:
-    -----------
-    d_model: int
-        Token embedding dimension
-    num_experts: int
-        Number of available experts
-    router_bias: bool
-        Whether to use bias
-    router_dtype: torch.dtype
-        Data type to use for softmax of the router.
-    router_jitter: float
-        Jitter to apply to inputs of the router.
-
-    Input shape: (num_tokens, d_model)
-
-    Returns:
-    --------
-    logits: (num_tokens, num_experts) routing scores
-    probs: (num_tokens, num_experts) routing probabilities
-    expert_probs: (num_experts, expert_capacity) expert-selected token probabilities
-    expert_indices: (num_experts, expert_capacity) selected token indices
+        
+        If tokens are not selected by an expert, their hidden states are passed to the
+        subsequent layer unchanged.
 
     .. _Mixture-of-Experts with Expert Choice Routing:
         https://arxiv.org/abs/2202.09368
 
     .. _Switch Transformers:
         https://arxiv.org/abs/2101.03961
-    
-    .. _Mixtral HuggingFace Code:
-        https://github.com/huggingface/transformers/blob/main/src/transformers/models/mixtral/modeling_mixtral.py#L86
 
     """
-
-    def __init__(
-        self, 
-        d_model: int, 
-        num_experts: int,
-        router_bias: bool,
-        router_dtype: str,
-        router_jitter: float
-    ):
-        super().__init__()
-        self.router_dtype = _str_to_dtype(router_dtype)
-        self.router_jitter = router_jitter
-
-        self.linear = nn.Linear(d_model, num_experts, bias=router_bias)
-
     def forward(
         self, 
         x: torch.Tensor, 
+        padding_mask: torch.Tensor,
         k: int, 
         expert_capacity: int
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Parameters:
+        -----------
+        x : torch.Tensor
+            Shape: `(num_tokens, d_model)`. Input token representations.
+        padding_mask : Optional[torch.Tensor]
+            Shape: `(batch_size, seq_len)`. Boolean mask for padded tokens (not yet applied).
+        k : int
+            Unused by expert choice router. Present for compatibility with TopKRouter
+        expert_capacity : int
+            Maximum number of tokens each expert can process.
 
+        Returns:
+        --------
+        logits : torch.Tensor
+            Raw routing scores `(num_tokens, num_experts)`.
+        probs : torch.Tensor
+            Routing probabilities `(num_tokens, num_experts)`.
+        expert_probs : torch.Tensor
+            Selected token probabilities for each expert `(num_experts, expert_capacity)`.
+        expert_indices : torch.Tensor
+            Token indices assigned to each expert `(num_experts, expert_capacity)`.
+
+        """
         # add jitter if training
         if self.training and self.router_jitter > 0:
             x *= torch.empty_like(x).uniform_(1.0 - self.router_jitter, 1.0 + self.router_jitter)
@@ -238,15 +250,3 @@ class ExpertChoiceRouter(nn.Module):
         expert_probs = expert_probs.to(x.dtype)
 
         return logits, probs, expert_probs.T, expert_indices.T
-
-def _str_to_dtype(dtype_str: str) -> torch.dtype:
-    dtype_mapping = {
-        "float32": torch.float32,
-        "float16": torch.float16,
-        "bfloat16": torch.bfloat16,
-    }
-    
-    if dtype_str not in dtype_mapping:
-        raise ValueError(f"Invalid dtype string: {dtype_str}. Choose from {list(dtype_mapping.keys())}")
-
-    return dtype_mapping[dtype_str]

@@ -414,7 +414,9 @@ class SparseFFN(nn.Module):
         return self.absolute_capacity
 
     def forward(
-        self, x: torch.Tensor
+        self,
+        x: torch.Tensor,
+        padding_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Forward pass for the SparseFFN layer.
@@ -423,6 +425,9 @@ class SparseFFN(nn.Module):
         -----------
         x : torch.Tensor
             Input tensor of shape (batch_size, seq_len, model_dim).
+
+        padding_mask: Optional[torch.Tensor], default=None
+            Boolean mask indicating padded positions (batch_size, seq_len)
 
         Returns:
         --------
@@ -438,23 +443,32 @@ class SparseFFN(nn.Module):
         """
         batch_size, seq_len, d_model = x.shape
         num_tokens = batch_size * seq_len
-        x_flat = x.view(-1, d_model)  # ==> (num_tokens, d_model)
 
+        # flatten logits & padding mask
+        x_flat = x.view(-1, d_model)  # ==> (num_tokens, d_model)
+        padding_flat = padding_mask.view(-1) if padding_mask is not None else None
+
+        # expert capacity based on number of tokens
         capacity = self._compute_capacity(num_tokens)
         
         # logits are shape (num_tokens, num_experts)
         # probs and indices are shape (num_experts, expert_capacity)
         router_logits, router_probs, expert_probs, expert_indices = self.router(
-            x_flat, k=self.k, expert_capacity=capacity
+            x_flat, 
+            padding_mask=padding_flat,
+            k=self.k, 
+            expert_capacity=capacity,
         )
 
+        # TODO: parallelize this?? looping through experts seems incorrect
         output = torch.zeros_like(x_flat)
         for expert_idx, expert in enumerate(self.experts):
             # get token indices and probs for current expert
             token_indices = expert_indices[expert_idx]  # ==> (expert_capacity,)
             token_probs = expert_probs[expert_idx]  # ==> (expert_capacity,)
             
-            # remove padding (in undersubscribed experts, empty slots are filled with -1)
+            # remove tokens that were not selected
+            # (in undersubscribed experts, empty slots are filled with -1)
             valid_token_mask = token_indices >= 0
             valid_token_indices = token_indices[valid_token_mask]
             valid_token_probs = token_probs[valid_token_mask]
@@ -805,7 +819,10 @@ class SparseTransformerLayer(nn.Module):
         # sparse FFN
         residual = x
         x = self.ffn_layer_norm(x)
-        ffn_out, router_tuple = self.sparse_ffn(x)
+        ffn_out, router_tuple = self.sparse_ffn(
+            x,
+            padding_mask=padding_mask
+        )
         x = residual + self.ffn_dropout(ffn_out)
 
         return (x, attn_vals, router_tuple) if need_weights else (x, router_tuple)
