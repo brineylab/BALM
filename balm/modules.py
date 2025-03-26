@@ -460,8 +460,9 @@ class SparseFFN(nn.Module):
             expert_capacity=capacity,
         )
 
-        # clone hidden states and only update selected token states
-        output = x_flat.clone()
+        # init empty output tensor
+        # this will be added to the residual input tensor in the SparseTransformerLayer
+        output = torch.zeros_like(x_flat)
         for expert_idx, expert in enumerate(self.experts):
             # get token indices and probs for current expert ==> (expert_capacity,)
             token_indices = expert_indices[expert_idx]
