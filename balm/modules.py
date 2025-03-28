@@ -348,13 +348,13 @@ class SparseFFN(nn.Module):
         
         # router
         self.router_type = router_type
+        self.router_jitter = router_jitter
         if router_type == "topk":
             self.router = TopKRouter(
                 d_model=model_dim, 
                 num_experts=num_experts,
                 router_bias=router_bias,
                 router_dtype=router_dtype,
-                router_jitter=router_jitter
             )
         elif router_type == "expert choice":
             self.router = ExpertChoiceRouter(
@@ -362,7 +362,6 @@ class SparseFFN(nn.Module):
                 num_experts=num_experts,
                 router_bias=router_bias,
                 router_dtype=router_dtype,
-                router_jitter=router_jitter
             )
         else:
             raise ValueError(f"Invalid router type: {router_type}")
@@ -443,6 +442,10 @@ class SparseFFN(nn.Module):
         """
         batch_size, seq_len, d_model = x.shape
         num_tokens = batch_size * seq_len
+
+        # add jitter if training, before reshaping logits
+        if self.training and self.router_jitter > 0:
+            x *= torch.empty_like(x).uniform_(1.0 - self.router_jitter, 1.0 + self.router_jitter)
 
         # flatten logits & padding mask
         x_flat = x.view(-1, d_model)  # ==> (num_tokens, d_model)

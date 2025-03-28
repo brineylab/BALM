@@ -26,8 +26,6 @@ class BaseRouter(nn.Module):
         Whether to use bias
     router_dtype: torch.dtype
         Data type to use for softmax of the router.
-    router_jitter: float
-        Jitter to apply to inputs.
 
     """
     def __init__(
@@ -36,11 +34,9 @@ class BaseRouter(nn.Module):
         num_experts: int,
         router_bias: bool,
         router_dtype: str,
-        router_jitter: float,
     ):
         super().__init__()
         self.router_dtype = self._str_to_dtype(router_dtype)
-        self.router_jitter = router_jitter
         self.linear = nn.Linear(d_model, num_experts, bias=router_bias)
 
     def _str_to_dtype(self, dtype_str: str) -> torch.dtype:
@@ -62,8 +58,7 @@ class TopKRouter(BaseRouter):
     Alternatively, if k=2, this replicates the top-2 routing strategy introduced in the `GShard`_
     paper. Tokens are routed to their expert of choice until the expert's `expert_capacity` is
     reached. Shared experts, which process all tokens, are implemented as described in the
-    `DeepSeqMoE`_ paper. Input jitter and high router precision is modeled on the 'Switch Transformers`_ 
-    implementation. 
+    `DeepSeqMoE`_ paper.
 
     .. note::
         There is no guarantee that each token will be processed by an expert,
@@ -117,10 +112,6 @@ class TopKRouter(BaseRouter):
         num_tokens = x.size(0)
         num_experts = self.linear.out_features
         k = min(k, num_experts)
-
-        # add jitter if training
-        if self.training and self.router_jitter > 0:
-            x *= torch.empty_like(x).uniform_(1.0 - self.router_jitter, 1.0 + self.router_jitter)
 
         # compute routing logits and probs ==> (num_tokens, num_experts)
         logits = self.linear(x)
@@ -193,8 +184,7 @@ class ExpertChoiceRouter(BaseRouter):
     This router uses the "expert choice of top-k tokens" strategy, as originally described
     in the `Mixture-of-Experts with Expert Choice Routing`_ paper. This automatically
     balances the number of tokens processed by each expert, and eliminates the
-    need for an auxiliary (load-balancing) router loss. Input jitter and high router precision 
-    is modeled on the 'Switch Transformers`_ implementation. 
+    need for an auxiliary (load-balancing) router loss.
 
     .. note::
         There is no guarantee that each token will be processed by an expert. In fact,
@@ -207,9 +197,6 @@ class ExpertChoiceRouter(BaseRouter):
 
     .. _Mixture-of-Experts with Expert Choice Routing:
         https://arxiv.org/abs/2202.09368
-
-    .. _Switch Transformers:
-        https://arxiv.org/abs/2101.03961
 
     """
     def forward(
@@ -243,9 +230,6 @@ class ExpertChoiceRouter(BaseRouter):
             Token indices assigned to each expert `(num_experts, expert_capacity)`.
 
         """
-        # add jitter if training
-        if self.training and self.router_jitter > 0:
-            x *= torch.empty_like(x).uniform_(1.0 - self.router_jitter, 1.0 + self.router_jitter)
         
         # compute routing logits ==> (num_tokens, num_experts)
         logits = self.linear(x)
