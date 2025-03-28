@@ -51,6 +51,8 @@ class BalmTokenizer(PreTrainedTokenizerFast):
 
     """
 
+    model_input_names = ["input_ids", "attention_mask"]
+
     def __init__(
         self,
         vocab_file: Optional[str] = None,
