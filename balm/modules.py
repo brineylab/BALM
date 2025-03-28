@@ -463,9 +463,9 @@ class SparseFFN(nn.Module):
             expert_capacity=capacity,
         )
 
-        # init empty output tensor
-        # this will be added to the residual input tensor in the SparseTransformerLayer
-        output = torch.zeros_like(x_flat)
+        # clone hidden states
+        # this paseses hidden states unchanged for tokens that aren't sent to any expert
+        output = x_flat.clone()
         for expert_idx, expert in enumerate(self.experts):
             # get token indices and probs for current expert ==> (expert_capacity,)
             token_indices = expert_indices[expert_idx]
@@ -481,13 +481,12 @@ class SparseFFN(nn.Module):
             if valid_token_indices.numel() == 0:
                 continue
             
-            # get expert input and weights
+            # get expert input
             expert_input = x_flat[valid_token_indices]
-            weights = valid_token_probs
             
             # compute expert output
             # scale output by routing probability
-            expert_output = expert(expert_input) * weights.unsqueeze(1)
+            expert_output = expert(expert_input) * valid_token_probs.unsqueeze(1)
             
             # accumulate expert output
             output[valid_token_indices] += expert_output
