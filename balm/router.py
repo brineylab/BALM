@@ -121,10 +121,14 @@ class TopKRouter(BaseRouter):
 
         # select top-k experts for each token ==> (num_tokens, k)
         topk_probs, topk_expert_ids = torch.topk(probs, k, dim=-1)
-        topk_probs /= topk_probs.sum(dim=-1, keepdim=True) # normalize probs to sum to 1
 
         # convert back to original dtype
         topk_probs = topk_probs.to(x.dtype)
+
+        # normalize probs to sum to 1
+        # but save unnormalized probs for sorting
+        unnorm_topk_probs = topk_probs.clone().detach()
+        topk_probs /= topk_probs.sum(dim=-1, keepdim=True) 
 
         # TODO
         # mask padding tokens
@@ -141,8 +145,9 @@ class TopKRouter(BaseRouter):
 
 
         # flatten top-k expert IDs and probs ==> (num_tokens * k)
-        flat_expert_ids = topk_expert_ids.reshape(-1)
-        flat_probs = topk_probs.reshape(-1)
+        flat_expert_ids, flat_unnorm_probs, flat_probs = (
+            topk_expert_ids.reshape(-1), unnorm_topk_probs.reshape(-1), topk_probs.reshape(-1)
+        )
 
         # we also need the original token ids that correspond to each slot
         # in flattened form: e.g. 0..(num_tokens-1) repeated k times ==> (num_tokens * k)
@@ -166,15 +171,19 @@ class TopKRouter(BaseRouter):
         for e in range(num_experts):
             mask = flat_expert_ids == e
             chosen_token_ids = flat_token_ids[mask]
+            chosen_unnorm_probs = flat_unnorm_probs[mask]
             chosen_probs = flat_probs[mask]
 
             # sort by expert affinity
             if chosen_token_ids.numel() > 0:
-                sorted_probs, sorted_idx = torch.sort(chosen_probs, descending=True)
-                # take up to `expert_capacity` tokens per expert
-                keep = min(expert_capacity, sorted_probs.size(0))
-                expert_probs[e, :keep] = sorted_probs[:keep]
-                expert_indices[e, :keep] = chosen_token_ids[sorted_idx[:keep]]
+                
+                # keep highest unnormalized probs, up to `expert_capacity` tokens per expert
+                keep = min(expert_capacity, chosen_token_ids.size(0))
+                _, sorted_idx = torch.topk(chosen_unnorm_probs, keep)
+
+                # filter for selected idxs
+                expert_probs[e, :keep] = chosen_probs[sorted_idx] # use normalized probs for weighting expert outputs
+                expert_indices[e, :keep] = chosen_token_ids[sorted_idx]
 
         return logits, probs, expert_probs, expert_indices
 
