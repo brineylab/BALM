@@ -464,7 +464,7 @@ class SparseFFN(nn.Module):
         )
 
         # clone hidden states
-        # this paseses hidden states unchanged for tokens that aren't sent to any expert
+        # this passes hidden states unchanged for tokens that aren't sent to any expert
         output = x_flat.clone()
         for expert_idx, expert in enumerate(self.experts):
             # get token indices and probs for current expert ==> (expert_capacity,)
