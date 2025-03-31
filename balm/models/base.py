@@ -68,7 +68,7 @@ class FreezeBaseModelMixin:
 
 
 class ParameterCountMixin:
-    def num_parameters(
+    def count_parameters(
         self,
         only_trainable: bool = True,
         exclude_embeddings: bool = False,
