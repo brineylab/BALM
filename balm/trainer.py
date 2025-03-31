@@ -4,6 +4,8 @@
 
 from transformers import Trainer
 
+__all__ = ["LossLoggingTrainer"]
+
 
 class LossLoggingTrainer(Trainer):
     def __init__(self, *args, **kwargs):
