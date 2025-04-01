@@ -18,8 +18,7 @@ def router_z_loss(router_logits: torch.Tensor) -> torch.Tensor:
     Parameters
     ----------
     router_logits : float
-        Input logits of shape [batch_size, sequence_length, num_experts] (OLD)
-        new shape: [batch_size * sequence_length, num_experts] (NEW)
+        Input logits of shape [batch_size * sequence_length, num_experts]
 
     Returns
     -------
