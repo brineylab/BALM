@@ -63,11 +63,17 @@ class BalmConfig(PretrainedConfig):
     pad_token_id : int, default=1
         The pad token id.
 
+    mlm_activation: str, default="gelu"
+        The activation function to use for the LM head.
+
+    classifier_activation: str, default="tanh"
+        The activation function to use for the classifier.
+
+    classification_freeze_base: bool, default=True
+        Whether to freeze the base weights of classification model. 
+    
     num_labels : int, default=2
         The number of labels for the classification head (sequence or token classification).
-
-    num_choices : int, default=4
-        The number of choices for the multiple choice classification head.
 
     output_attentions : bool, default=False
         Whether to output the attentions.
@@ -78,6 +84,9 @@ class BalmConfig(PretrainedConfig):
 
     output_hidden_states : bool, default=False
         Whether to output the hidden states.
+
+    return_dict: bool, default = True
+        Whether to return a dictionary of outputs (returns a tuple if False).
 
     use_cache : bool, default=True
         Whether to use the cache.
@@ -91,13 +100,7 @@ class BalmConfig(PretrainedConfig):
         If the positional embedding type is not valid.
 
     ValueError
-        If the router type is not valid.
-
-    ValueError
-        If the expert capacity type is not valid.
-
-    ValueError
-        If the FFN or expert activation functions are not valid.
+        If the FFN or classifier activation functions are not valid.
 
     .. _here:
         https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html#torch.nn.MultiheadAttention.forward
@@ -128,7 +131,6 @@ class BalmConfig(PretrainedConfig):
         classifier_activation: str = "tanh",
         classification_freeze_base: bool = True,
         num_labels: int = 2,  # sequence/token-level classification
-        num_choices: int = 4,  # multiple choice classification
         # outputs
         output_attentions: bool = False,
         output_hidden_states: bool = False,
@@ -159,21 +161,22 @@ class BalmConfig(PretrainedConfig):
         self.initializer_range = float(initializer_range)
         self.layer_norm_eps = float(layer_norm_eps)
         self.position_embedding_type = position_embedding_type.lower()
-        self.use_cache = bool(use_cache)
-
+        
         # mlm
         self.mlm_activation = mlm_activation.lower()
 
         # classification
-        self.num_labels = int(num_labels)
-        self.num_choices = int(num_choices)
         self.classifier_activation = classifier_activation.lower()
         self.classification_freeze_base = bool(classification_freeze_base)
+        self.num_labels = int(num_labels)
 
         # outputs
-        self.return_dict = bool(return_dict)
         self.output_attentions = bool(output_attentions)
         self.output_hidden_states = bool(output_hidden_states)
+        self.return_dict = bool(return_dict)
+
+        # 🤗 integration
+        self.use_cache = bool(use_cache)
 
         # validate params
         if self.position_embedding_type not in ["rotary", "relative", "absolute"]:

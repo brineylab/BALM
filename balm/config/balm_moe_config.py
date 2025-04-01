@@ -69,6 +69,9 @@ class BalmMoEConfig(PretrainedConfig):
 
     num_experts_per_tok : int, default=1
         The number of experts to route each token to. Only used if `router_type` is ``"topk"``.
+    
+    alternate_sparsity : bool, default=True
+        Whether to use alternate sparse and dense layers.
 
     router_type : str, default="topk"
         The type of router to use.
@@ -80,6 +83,15 @@ class BalmMoEConfig(PretrainedConfig):
     
     router_jitter: float, default=0.0
         Jitter to apply to inputs of the router.
+
+    router_bias: bool, default=False
+        Whether to use a bias in the router.
+
+    router_aux_loss_coef : float, default=0.01
+        The coefficient for the auxiliary loss.
+
+    router_z_loss_coef : float, default=0.001
+        The coefficient for the z-loss.
 
     expert_capacity_type : str, default="multiplier"
         The type of expert capacity to use.
@@ -101,20 +113,17 @@ class BalmMoEConfig(PretrainedConfig):
     expert_bias : bool, default=True
         Whether to use a bias in expert FFN layers. Used in SparseTransformerLayers only.
 
-    alternate_sparsity : bool, default=True
-        Whether to use alternate sparse and dense layers.
+    mlm_activation: str, default="gelu"
+        The activation function to use for the LM head.
 
-    aux_loss_coef : float, default=0.01
-        The coefficient for the auxiliary loss.
+    classifier_activation: str, default="tanh"
+        The activation function to use for the classifier.
 
-    z_loss_coef : float, default=0.001
-        The coefficient for the z-loss.
+    classification_freeze_base: bool, default=True
+        Whether to freeze the base weights of classification model. 
 
     num_labels : int, default=2
         The number of labels for the classification head (sequence or token classification).
-
-    num_choices : int, default=4
-        The number of choices for the multiple choice classification head.
 
     output_attentions : bool, default=False
         Whether to output the attentions.
@@ -125,6 +134,15 @@ class BalmMoEConfig(PretrainedConfig):
 
     output_hidden_states : bool, default=False
         Whether to output the hidden states.
+
+    output_router_logits: bool, default=False
+        Whether to output router logits.
+
+    output_expert_indexes: bool, default=False
+        Whether to output expert indexes.
+    
+    return_dict: bool, default = True
+        Whether to return a dictionary of outputs (returns a tuple if False).
 
     use_cache : bool, default=True
         Whether to use the cache.
@@ -144,7 +162,7 @@ class BalmMoEConfig(PretrainedConfig):
         If the expert capacity type is not valid.
 
     ValueError
-        If the FFN or expert activation functions are not valid.
+        If the FFN, expert, or classifier activation functions are not valid.
 
     .. _here:
         https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html#torch.nn.MultiheadAttention.forward
@@ -169,7 +187,6 @@ class BalmMoEConfig(PretrainedConfig):
         position_embedding_type: str = "rotary",
         mask_token_id: int = 31,
         pad_token_id: int = 1,
-
         ## MoE params
         num_experts: int = 8,
         num_shared_experts: int = 0, # TODO
@@ -195,7 +212,6 @@ class BalmMoEConfig(PretrainedConfig):
         classifier_activation: str = "tanh",
         classification_freeze_base: bool = True,
         num_labels: int = 2,  # sequence/token-level classification
-        num_choices: int = 4,  # multiple choice classification
         # outputs
         output_attentions: bool = False,
         output_hidden_states: bool = False,
@@ -228,30 +244,18 @@ class BalmMoEConfig(PretrainedConfig):
         self.initializer_range = float(initializer_range)
         self.layer_norm_eps = float(layer_norm_eps)
         self.position_embedding_type = position_embedding_type.lower()
-        self.use_cache = bool(use_cache)
-
-        # classification
-        self.num_labels = int(num_labels)
-        self.num_choices = int(num_choices)
-        self.classifier_activation = classifier_activation.lower()
-        self.classification_freeze_base = bool(classification_freeze_base)
-        self.mlm_activation = mlm_activation.lower()
-
-        # outputs
-        self.return_dict = bool(return_dict)
-        self.output_attentions = bool(output_attentions)
-        self.output_hidden_states = bool(output_hidden_states)
-        self.output_router_logits = bool(output_router_logits)
-        self.output_expert_indexes = bool(output_expert_indexes)
 
         # MoE params
         self.num_experts = int(num_experts)
-        self.num_shared_experts = int(num_shared_experts)
+        self.num_shared_experts = int(num_shared_experts) # TODO
         self.num_experts_per_tok = int(num_experts_per_tok)
+        self.alternate_sparsity = bool(alternate_sparsity)
         self.router_type = self._standardize_router_type(router_type)
         self.router_dtype = router_dtype.lower()
         self.router_jitter = float(router_jitter)
         self.router_bias = bool(router_bias)
+        self.router_aux_loss_coef = float(router_aux_loss_coef)
+        self.router_z_loss_coef = float(router_z_loss_coef)
         self.expert_capacity_type = expert_capacity_type.lower()
         self.expert_capacity = expert_capacity
         self.expert_activation = expert_activation.lower()
@@ -259,11 +263,25 @@ class BalmMoEConfig(PretrainedConfig):
             expert_dropout if expert_dropout is not None else dropout
         )
         self.expert_bias = bool(expert_bias)
-        self.alternate_sparsity = bool(alternate_sparsity)
 
-        # router losses
-        self.router_aux_loss_coef = float(router_aux_loss_coef)
-        self.router_z_loss_coef = float(router_z_loss_coef)
+        # mlm
+        self.mlm_activation = mlm_activation.lower()
+
+        # classification
+        self.classifier_activation = classifier_activation.lower()
+        self.classification_freeze_base = bool(classification_freeze_base)
+        self.num_labels = int(num_labels)
+
+        # outputs
+        self.output_attentions = bool(output_attentions)
+        self.output_hidden_states = bool(output_hidden_states)
+        self.output_router_logits = bool(output_router_logits)
+        self.output_expert_indexes = bool(output_expert_indexes)
+        self.return_dict = bool(return_dict)
+
+        # 🤗 integration
+        self.use_cache = bool(use_cache)
+
 
         # validate params
         if self.position_embedding_type not in ["rotary", "relative", "absolute"]:
