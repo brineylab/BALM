@@ -103,7 +103,7 @@ class BalmMoEConfig(PretrainedConfig):
         If `expert_capacity_type` is "multiplier", this value is translated as the multiplier with which the total
         expert capacity is calculated (i.e. each expert capacity = multiplier * max_position_embeddings / num_experts).
 
-        If capacity is less than 0, no expert capacity is set.
+        If capacity is less than 0, no expert capacity is set. This is only compatible with TopK routing.
 
     expert_activation : str, default="gelu"
         The activation function to use for the experts.

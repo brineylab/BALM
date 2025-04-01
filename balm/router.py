@@ -244,6 +244,11 @@ class ExpertChoiceRouter(BaseRouter):
             Token indices assigned to each expert `(num_experts, expert_capacity)`.
 
         """
+        # raise error if no expert capacity
+        if expert_capacity <= 0
+            raise ValueError(
+                "Expert capacity must be a positive integer for the Expert Choice router."
+            )
         
         # compute routing logits ==> (num_tokens, num_experts)
         logits = self.linear(x)
