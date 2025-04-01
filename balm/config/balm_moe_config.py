@@ -282,7 +282,6 @@ class BalmMoEConfig(PretrainedConfig):
         # 🤗 integration
         self.use_cache = bool(use_cache)
 
-
         # validate params
         if self.position_embedding_type not in ["rotary", "relative", "absolute"]:
             raise ValueError(
