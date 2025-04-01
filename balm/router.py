@@ -245,7 +245,7 @@ class ExpertChoiceRouter(BaseRouter):
 
         """
         # raise error if no expert capacity
-        if expert_capacity <= 0
+        if expert_capacity <= 0:
             raise ValueError(
                 "Expert capacity must be a positive integer for the Expert Choice router."
             )

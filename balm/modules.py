@@ -387,14 +387,15 @@ class SparseFFN(nn.Module):
         self.k = k
 
         # capacity
-        if expert_capacity_type == "multiplier":
+        if expert_capacity < 0:
+            self.expert_capacity = -1
+        elif expert_capacity_type == "absolute":
+            self.expert_capacity = expert_capacity
+        else: # need num_tokens to compute
             self.capacity_multiplier = expert_capacity
-            self.absolute_capacity = None
-        else:
-            self.absolute_capacity = expert_capacity
-            self.capacity_multiplier = None
+            self.expert_capacity = None
 
-    def _compute_capacity(self, num_tokens: int) -> int:
+    def _compute_multiplier_capacity(self, num_tokens: int) -> int:
         """
         Determine expert capacity.
 
@@ -408,11 +409,7 @@ class SparseFFN(nn.Module):
         capacity : int
             Expert capacity.
         """
-        if self.expert_capacity < 0:
-            return -1
-        if self.capacity_multiplier:
-            return int(self.capacity_multiplier * num_tokens / self.num_experts)
-        return self.absolute_capacity
+        return int(self.capacity_multiplier * num_tokens / self.num_experts)
 
     def forward(
         self,
@@ -453,9 +450,9 @@ class SparseFFN(nn.Module):
         x_flat = x.view(-1, d_model)  # ==> (num_tokens, d_model)
         padding_flat = padding_mask.view(-1) if padding_mask is not None else None
 
-        # expert capacity based on number of tokens
-        capacity = self._compute_capacity(num_tokens)
-        
+        # expert capacity
+        capacity = self._compute_multiplier_capacity(num_tokens) if self.expert_capacity is None else self.expert_capacity
+
         # logits are shape (num_tokens, num_experts)
         # probs and indices are shape (num_experts, expert_capacity)
         router_logits, router_probs, expert_probs, expert_indices = self.router(
