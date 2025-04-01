@@ -349,6 +349,10 @@ class BalmForSequenceClassification(
         # initialize weights
         self.init_weights()
 
+        # freeze base model weights
+        if config.classification_freeze_base:
+            self.freeze_base_model()
+
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -422,19 +426,16 @@ class BalmForSequenceClassification(
                 classifier_logits.view(-1, self.config.num_labels),
                 labels.view(-1),
             )
-        else:
-            classifier_loss = None
 
         # outputs
         if not return_dict:
             return tuple(
                 v
                 for v in [
-                    loss,
+                    classifier_loss,
                     classifier_logits,
                     outputs.hidden_states,
                     outputs.attentions,
-                    classifier_loss,
                 ]
                 if v is not None
             )
@@ -443,5 +444,4 @@ class BalmForSequenceClassification(
             logits=classifier_logits,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
-            classifier_loss=classifier_loss,
         )
