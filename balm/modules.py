@@ -408,6 +408,8 @@ class SparseFFN(nn.Module):
         capacity : int
             Expert capacity.
         """
+        if self.expert_capacity < 0:
+            return -1
         if self.capacity_multiplier:
             return int(self.capacity_multiplier * num_tokens / self.num_experts)
         return self.absolute_capacity

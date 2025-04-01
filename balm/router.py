@@ -113,6 +113,11 @@ class TopKRouter(BaseRouter):
         num_experts = self.linear.out_features
         k = min(k, num_experts)
 
+        # handle no expert capacity
+        # max number of tokens one expert could take is the num_tokens
+        if expert_capacity == -1:
+            expert_capacity = num_tokens
+
         # compute routing logits and probs ==> (num_tokens, num_experts)
         logits = self.linear(x)
 
