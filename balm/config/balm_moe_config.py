@@ -204,7 +204,7 @@ class BalmMoEConfig(PretrainedConfig):
         router_z_loss_coef: float = 0.001,
         # experts
         expert_capacity_type: str = "multiplier",
-        expert_capacity: Union[int, float] = 1,
+        expert_capacity: int = 1,
         expert_activation: str = "gelu",
         expert_dropout: Optional[float] = None,
         expert_bias: bool = True,

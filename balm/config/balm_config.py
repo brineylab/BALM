@@ -44,7 +44,7 @@ class BalmConfig(PretrainedConfig):
     ffn_bias : bool, default=True
         Whether to use a bias for FFN layers.
 
-    max_position_embeddings : int, default=320
+    max_position_embeddings : int, default=256
         The maximum position embeddings.
 
     initializer_range : float, default=0.02
@@ -119,7 +119,7 @@ class BalmConfig(PretrainedConfig):
         attention_dropout: Optional[float] = None,
         hidden_dropout: Optional[float] = None,
         ffn_bias: bool = True,
-        max_position_embeddings: int = 320,
+        max_position_embeddings: int = 256,
         initializer_range: float = 0.02,
         layer_norm_eps: float = 1e-5,
         position_embedding_type: str = "rotary",
