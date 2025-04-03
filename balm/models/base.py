@@ -91,7 +91,7 @@ class ParameterCountMixin:
             Raises ValueError if no MoE layers are found.
         
         num_tokens: int, optional, default=0
-            The number of tokens processed per batch 
+            The number of tokens processed per batch.
 
         exclude_embeddings : bool, optional, default=`False`
             Whether or not to return only the number of non-embeddings parameters
@@ -129,14 +129,22 @@ class ParameterCountMixin:
             num_experts = self.config.num_experts
             capacity_type = self.config.expert_capacity_type
             expert_capacity = self.config.expert_capacity
-
-            # calculate proportion of tokens that each expert receives
-            # calculation depends on the capacity type
+            
+            # checks
             if capacity_type == 'absolute' and num_tokens == 0:
                 raise ValueError(
-                    "Number of tokens per batch must be specified when capacity type is absolute."
+                    "To calculate the number of active parameters, you must specify the number of tokens per batch "
+                    "when the capacity type is 'absolute'"
                 )
-            prop_tokens_per_expert = expert_capacity / (num_tokens if capacity_type == 'absolute' else num_experts)
+
+            # calculate proportion of tokens that each expert receives
+            if expert_capacity == -1: 
+                k = self.config.num_experts_per_tok
+                prop_tokens_per_expert = k / num_experts
+            elif capacity_type == 'absolute':
+                prop_tokens_per_expert = expert_capacity / num_tokens
+            else:
+                prop_tokens_per_expert = expert_capacity / num_experts
 
             # count dense parameters
             total_num_params = sum(
