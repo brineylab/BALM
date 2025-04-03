@@ -11,6 +11,8 @@ import torch
 import torch.nn as nn
 from transformers import PreTrainedModel
 
+from ..modules import SparseFFN
+
 WEIGHTS_NAME = "model.pt"
 SAFE_WEIGHTS_NAME = "model.safetensors"
 
@@ -71,6 +73,8 @@ class ParameterCountMixin:
     def count_parameters(
         self,
         only_trainable: bool = True,
+        only_active: bool = False,
+        num_tokens: int = 0,
         exclude_embeddings: bool = False,
         human_readable: bool = False,
     ) -> int:
@@ -79,13 +83,20 @@ class ParameterCountMixin:
 
         Parameters
         ----------
-        only_trainable : bool, optional, defaults to `False`
+        only_trainable : bool, optional, default=`True`
             Whether or not to return only the number of trainable parameters
 
-        exclude_embeddings : bool, optional, defaults to `False`
+        only_active: bool, optional, default=`False`
+            Whether or not to return only the number of active parameters.
+            Raises ValueError if no MoE layers are found.
+        
+        num_tokens: int, optional, default=0
+            The number of tokens processed per batch 
+
+        exclude_embeddings : bool, optional, default=`False`
             Whether or not to return only the number of non-embeddings parameters
 
-        human_readable : bool, optional, defaults to `False`
+        human_readable : bool, optional, default=`False`
             Whether or not to return the number of parameters in a human-readable format
 
         Returns
@@ -95,36 +106,74 @@ class ParameterCountMixin:
             will be returned as a string in a human-readable format.
         """
 
+        # check if embeddings should be excluded
         if exclude_embeddings:
-            embedding_param_names = [
+            exclude_param_names = [
                 f"{name}.weight"
                 for name, module_type in self.named_modules()
                 if isinstance(module_type, nn.Embedding)
             ]
-            total_parameters = [
-                parameter
-                for name, parameter in self.named_parameters()
-                if name not in embedding_param_names
-            ]
         else:
-            total_parameters = list(self.parameters())
+            exclude_param_names = []
+    
+        # count only active parameters
+        if only_active: 
+            # locate MoE layers
+            moe_layers = [module for module in self.modules() if isinstance(module, SparseFFN)]
+            if not moe_layers:
+                raise ValueError(
+                    "No MoE layers were found."
+                )
 
-        total_numel = []
-        for param in total_parameters:
-            if param.requires_grad or not only_trainable:
-                total_numel.append(param.numel())
-        total_num_params = sum(total_numel)
+            # get the necessary config values
+            num_experts = self.config.num_experts
+            capacity_type = self.config.expert_capacity_type
+            expert_capacity = self.config.expert_capacity
+
+            # calculate proportion of tokens that each expert receives
+            # calculation depends on the capacity type
+            if capacity_type == 'absolute' and num_tokens == 0:
+                raise ValueError(
+                    "Number of tokens per batch must be specified when capacity type is absolute."
+                )
+            prop_tokens_per_expert = expert_capacity / (num_tokens if capacity_type == 'absolute' else num_experts)
+
+            # count dense parameters
+            total_num_params = sum(
+                p.numel()
+                for name, p in self.named_parameters()
+                if (not any(p is e for moe in moe_layers for e in moe.parameters()))
+                and (name not in exclude_param_names) and (not only_trainable or p.requires_grad)
+            )
+        
+            # count sparse parameters
+            for moe in moe_layers:
+                # router (fully active)
+                router_params = sum(p.numel() for p in moe.router.parameters())
+                total_num_params += router_params
+
+                # experts (partially active)
+                total_expert_params = sum(p.numel() for p in moe.experts.parameters())
+                active_expert_params = total_expert_params * prop_tokens_per_expert
+                total_num_params += active_expert_params             
+        # count all parameters
+        else: 
+            total_num_params = sum(
+                p.numel()
+                for name, p in self.named_parameters()
+                if name not in exclude_param_names and (not only_trainable or p.requires_grad)
+            )
 
         if human_readable:
-            if total_num_params < 1e3:
-                return total_num_params
-            elif total_num_params < 1e6:
-                return f"{total_num_params / 1e3:.2f}K"
-            elif total_num_params < 1e9:
-                return f"{total_num_params / 1e6:.2f}M"
-            elif total_num_params < 1e12:
-                return f"{total_num_params / 1e9:.2f}B"
-            else:
-                return f"{total_num_params / 1e12:.2f}T"
-        else:
-            return total_num_params
+            return self._human_readable(total_num_params)
+        return total_num_params
+    
+    def _human_readable(self, total_num_params):
+        units = ['T', 'B', 'M', 'K']
+        thresholds = [1e12, 1e9, 1e6, 1e3]
+        
+        for unit, threshold in zip(units, thresholds):
+            if total_num_params >= threshold:
+                return f"{total_num_params / threshold:.2f}{unit}"
+        
+        return str(total_num_params)
