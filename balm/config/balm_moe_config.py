@@ -293,6 +293,10 @@ class BalmMoEConfig(PretrainedConfig):
             raise ValueError(
                 f"Invalid expert capacity type: {self.expert_capacity_type}. Options are 'absolute' or 'multiplier'."
             )
+        if self.expert_capacity <= 0 and self.router_type == 'expert choice':
+            raise ValueError(
+                "Expert capacity must be a positive integer for the Expert Choice router."
+            )
         if self.activation not in ["swiglu", "relu", "gelu", "glu", "reglu", "geglu"]:
             raise ValueError(
                 f"Invalid FFN activation: {self.activation}. Options are 'swiglu', 'relu', 'gelu', 'glu', 'reglu', or 'geglu'."
