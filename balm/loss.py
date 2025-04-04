@@ -57,10 +57,17 @@ def router_load_balancing_loss(
 
     Parameters
     ----------
-    router_logits : torch.Tensor
-        Concatenated router logits for all sparse layers.
-        Shape: [num_tokens, num_experts].
+    router_probs : torch.Tensor
+        Concatenated router probs for all sparse layers.
+        Shape: [num_tokens, num_experts], where:
             # num_tokens = (batch_size * seq_len * num_sparse_layers)
+    
+    k: int
+        Number of experts each token is routed to (for topK routing).
+    
+    attention_mask: torch.Tensor, optional (default=None)
+        Attention mask
+        Shape: [batch_size, seq_len]
 
     Returns
     -------
@@ -118,7 +125,6 @@ def router_load_balancing_loss(
 
     overall_loss = torch.sum(tokens_per_expert * router_prob_per_expert.unsqueeze(0)) * num_experts
     return overall_loss
-
 
 
 # BROKEN
