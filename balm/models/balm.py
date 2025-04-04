@@ -63,7 +63,7 @@ class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.BoolTensor] = None,
+        attention_mask: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         output_attentions: Optional[bool] = None,
@@ -78,10 +78,9 @@ class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
             Tokenized input IDs, of shape (batch_size, sequence_length). Cannot be provided if
             `inputs_embeds` is also provided.
 
-        attention_mask: torch.BoolTensor
-            Attention mask, of shape (batch_size, sequence_length). If boolean, ``True`` indicates that
-            tokens should be ignored for attention purposes. If float, it is added to the attention
-            scores.
+        attention_mask: torch.LongTensor
+            Attention mask, of shape (batch_size, sequence_length). Values of `1` indicate valid tokens 
+            while values of `0` indicate padding that should be ignored for attention purposes.
 
         position_ids: torch.LongTensor
             Position IDs, of shape (batch_size, sequence_length).
@@ -219,13 +218,13 @@ class BalmForMaskedLM(BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountM
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.BoolTensor] = None,
+        attention_mask: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        labels: Optional[torch.Tensor] = None,
     ) -> Union[MaskedLMOutput, tuple]:
         """
         Forward pass
@@ -235,7 +234,7 @@ class BalmForMaskedLM(BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountM
         input_ids: torch.LongTensor
             Tokenized input IDs
 
-        attention_mask: torch.BoolTensor
+        attention_mask: torch.LongTensor
             Attention mask
 
         position_ids: torch.LongTensor
@@ -244,15 +243,15 @@ class BalmForMaskedLM(BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountM
         inputs_embeds: torch.FloatTensor
             Input embeddings, of shape (batch_size, sequence_length, hidden_size). Cannot be provided
             if `input_ids` is also provided.
+        
+        labels: torch.LongTensor
+            Labels
 
         output_attentions: bool
             Whether to output the attentions.
 
         output_hidden_states: bool
             Whether to output the hidden states.
-
-        labels: torch.LongTensor
-            Labels
 
         return_dict: bool
             Whether to return a dictionary of outputs (returns a tuple if False)
@@ -356,7 +355,7 @@ class BalmForSequenceClassification(
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.BoolTensor] = None,
+        attention_mask: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.Tensor] = None,
@@ -372,7 +371,7 @@ class BalmForSequenceClassification(
         input_ids: torch.LongTensor
             Tokenized input IDs
 
-        attention_mask: torch.BoolTensor
+        attention_mask: torch.LongTensor
             Attention mask
 
         position_ids: torch.LongTensor

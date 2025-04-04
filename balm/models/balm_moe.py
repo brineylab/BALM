@@ -76,7 +76,7 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.BoolTensor] = None,
+        attention_mask: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         output_attentions: Optional[bool] = None,
@@ -89,13 +89,12 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         Parameters:
         -----------
 
-        input_ids: torch.LomgTensor
+        input_ids: torch.LongTensor
             Tokenized input IDs
 
-        attention_mask: torch.BoolTensor
-            Attention mask, of shape (batch_size, sequence_length). If boolean, ``True`` indicates that
-            tokens should be ignored for attention purposes. If float, it is added to the attention
-            scores.
+        attention_mask: torch.LongTensor
+            Attention mask, of shape (batch_size, sequence_length). Values of `1` indicate valid tokens 
+            while values of `0` indicate padding that should be ignored for attention purposes.
 
         position_ids: torch.LongTensor
             Position IDs, of shape (batch_size, sequence_length).
@@ -124,21 +123,21 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         output (tuple or dict):
             If `return_dict` is ``True``, the output is a ``MoEModelOutput`` object:
                 - last_hidden_state (torch.FloatTensor): last hidden state
-                - z_loss (torch.FloatTensor): router z loss
-                - aux_loss (torch.FloatTensor): router auxiliary loss
                 - hidden_states (torch.FloatTensor): hidden states
                 - attentions (torch.FloatTensor): attention weights
                 - router_logits (torch.FloatTensor): router logits
                 - expert_indexes (torch.LongTensor): expert indexes
+                - z_loss (torch.FloatTensor): router z loss
+                - aux_loss (torch.FloatTensor): router auxiliary loss
 
-            If `return_dict` is ``False``, the output is a ``tuple`` with the f0llowing elements:
+            If `return_dict` is ``False``, the output is a ``tuple`` with the following elements:
                 - last_hidden_state (torch.FloatTensor): last hidden state
-                - z_loss (torch.FloatTensor): router z loss
-                - aux_loss (torch.FloatTensor): router auxiliary loss
                 - hidden_states (torch.FloatTensor): hidden states
                 - attentions (torch.FloatTensor): attention weights
                 - router_logits (torch.FloatTensor): router logits
                 - expert_indexes (torch.LongTensor): expert indexes
+                - z_loss (torch.FloatTensor): router z loss
+                - aux_loss (torch.FloatTensor): router auxiliary loss
 
             For attentions, hidden_states, router_logits, and expert_indexes, if they are not output, the corresponding
             value will be ``None`` (for ``MoEModelOutput``) or not returned at all (for ``tuple``).
@@ -298,8 +297,8 @@ class BalmMoEForMaskedLM(
 
     def forward(
         self,
-        input_ids: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
+        input_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.Tensor] = None,
@@ -317,7 +316,7 @@ class BalmMoEForMaskedLM(
         input_ids: torch.LongTensor
             Tokenized input IDs
 
-        attention_mask: torch.BoolTensor
+        attention_mask: torch.LongTensor
             Attention mask
 
         position_ids: torch.LongTensor
@@ -488,7 +487,7 @@ class BalmMoEForSequenceClassification(
         input_ids: torch.LongTensor
             Tokenized input IDs
 
-        attention_mask: torch.BoolTensor
+        attention_mask: torch.LongTensor
             Attention mask
 
         position_ids: torch.LongTensor
