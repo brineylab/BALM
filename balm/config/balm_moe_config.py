@@ -66,6 +66,10 @@ class BalmMoEConfig(PretrainedConfig):
 
     num_experts : int, default=8
         The number of experts in the model.
+    
+    num_shared_experts: int, default=0
+        The number of shared experts (which receive all tokens) in the model.
+        (TODO: This is NOT implemented yet)
 
     num_experts_per_tok : int, default=1
         The number of experts to route each token to. Only used if `router_type` is ``"topk"``.
@@ -191,7 +195,7 @@ class BalmMoEConfig(PretrainedConfig):
         pad_token_id: int = 1,
         ## MoE params
         num_experts: int = 8,
-        num_shared_experts: int = 0, # TODO
+        num_shared_experts: int = 0,
         num_experts_per_tok: int = 1,  # k for top-k routing (to comply with 🤗 naming)
         alternate_sparsity: bool = True,
         # router
@@ -249,7 +253,7 @@ class BalmMoEConfig(PretrainedConfig):
 
         # MoE params
         self.num_experts = int(num_experts)
-        self.num_shared_experts = int(num_shared_experts) # TODO
+        self.num_shared_experts = int(num_shared_experts)
         self.num_experts_per_tok = int(num_experts_per_tok)
         self.alternate_sparsity = bool(alternate_sparsity)
         self.router_type = self._standardize_router_type(router_type)

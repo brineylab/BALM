@@ -297,6 +297,9 @@ class SparseFFN(nn.Module):
     num_experts: int
         Number of experts.
     
+    num_shared_experts: int
+        Number of shared experts (which receive all the tokens).
+    
     expert_capacity_type : str
         The type of expert capacity to use. 
         If "absolute": tokens per expert; if "multiplier": capacity = multiplier * max_position_embeddings
@@ -334,6 +337,7 @@ class SparseFFN(nn.Module):
         model_dim: int,
         ffn_dim: int,
         num_experts: int,
+        num_shared_experts: int,
         expert_capacity_type: str,
         expert_capacity: Union[int, float],
         k: int = 1,
@@ -367,6 +371,7 @@ class SparseFFN(nn.Module):
             raise ValueError(f"Invalid router type: {router_type}")
 
         # experts
+        # TODO: implement shared expert(s)
         if expert_activation.lower() == "swiglu":
             expert = partial(
                 SwigluFFN,
@@ -465,6 +470,7 @@ class SparseFFN(nn.Module):
         # clone hidden states
         # this passes hidden states unchanged for tokens that aren't sent to any expert
         output = x_flat.clone()
+        # TODO: implement shared expert(s)
         for expert_idx, expert in enumerate(self.experts):
             # get token indices and probs for current expert ==> (expert_capacity,)
             token_indices = expert_indices[expert_idx]
@@ -764,6 +770,7 @@ class SparseTransformerLayer(nn.Module):
             expert_activation=config.expert_activation,
             expert_bias=config.expert_bias,
             num_experts=config.num_experts,
+            num_shared_experts=config.num_shared_experts,
             expert_capacity_type=config.expert_capacity_type,
             expert_capacity=config.expert_capacity,
             k=config.num_experts_per_tok,
