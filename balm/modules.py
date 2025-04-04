@@ -460,7 +460,7 @@ class SparseFFN(nn.Module):
 
         # logits are shape (num_tokens, num_experts)
         # probs and indices are shape (num_experts, expert_capacity)
-        router_logits, router_probs, expert_probs, expert_indices, full_expert_indices = self.router(
+        router_logits, router_probs, expert_probs, expert_indices = self.router(
             x_flat, 
             padding_mask=padding_flat,
             k=self.k, 
@@ -497,7 +497,7 @@ class SparseFFN(nn.Module):
             output[valid_token_indices] += expert_output
 
         output = output.view(batch_size, seq_len, d_model)
-        return output, (router_logits, router_probs, expert_probs, expert_indices, full_expert_indices)
+        return output, (router_logits, router_probs, expert_probs, expert_indices)
 
 
 # =================================

@@ -7,7 +7,7 @@ from typing import Optional
 import torch
 from torch.nn import functional as F
 
-__all__ = ["router_z_loss", "router_load_balancing_loss",  "router_load_balancing_loss_ignoredropped"]
+__all__ = ["router_z_loss", "router_load_balancing_loss"]
 
 
 def router_z_loss(router_logits: torch.Tensor) -> torch.Tensor:
@@ -119,58 +119,6 @@ def router_load_balancing_loss(
     overall_loss = torch.sum(tokens_per_expert * router_prob_per_expert.unsqueeze(0)) * num_experts
     return overall_loss
 
-
-# attempt at modifying mixtral aux loss to ignore dropped tokens
-# this code requires the router to return expert_indices that track the dropped tokens
-# initial results from trying this make me think we shouldn't do this
-# it seems to make the Top2 model essentially act like a Top1 model
-def router_load_balancing_loss_ignoredropped(
-    router_probs: torch.Tensor, # (num_tokens, num_experts)
-    expert_indices: torch.Tensor, # (num_tokens, k), dropped tokens 'route' to the value of num_experts (ie. a non-existent expert)
-) -> torch.Tensor:
-    """
-    Computes the auxiliary load balancing loss.
-
-    See the `Switch Transformer paper`_ for more details. This function
-    implements the loss function presented in equations (4) - (6) of the paper.
-    It aims at penalizing cases where the routing between experts is too unbalanced.
-
-    Differing from the original `Switch Transformer paper`_, this is a more general
-    implementation that supports both K=1 (top-1 routing) and K>1 (top-k routing):
-      - for K=1 (top-1 routing), this reduces to the Switch Transformer load balancing loss.
-      - for K>1 (top-k routing), this correctly accounts for multiple experts chosen per token.
-
-    Parameters
-    ----------
-    router_logits : torch.Tensor
-        Concatenated router logits for all sparse layers.
-        Shape: [num_tokens, num_experts].
-            # num_tokens = (batch_size * seq_len * num_sparse_layers)
-
-    Returns
-    -------
-    torch.Tensor
-        The auxiliary load balancing loss for the router.
-
-    .. _Switch Transformer paper:
-        https://arxiv.org/abs/2101.03961
-    """
-    num_tokens, num_experts = router_probs.shape
-
-    # generate expert mask with extra 'dropped' expert ==> (num_tokens, k, num_experts + 1)
-    expert_mask = torch.nn.functional.one_hot(expert_indices, num_experts + 1)
-
-    # remove 'dropped' expert ==> (num_tokens, k, num_experts)
-    expert_mask = expert_mask[:, :, :-1]
-
-    # Compute the percentage of tokens routed to each experts ==> (k, num_experts)
-    tokens_per_expert = torch.mean(expert_mask.float(), dim=0)
-
-    # Compute the average probability of routing to these experts ==> (num_experts)
-    router_prob_per_expert = torch.mean(router_probs, dim=0)
-
-    overall_loss = torch.sum(tokens_per_expert * router_prob_per_expert.unsqueeze(0)) * num_experts
-    return overall_loss
 
 
 # BROKEN

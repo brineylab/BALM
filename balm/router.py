@@ -170,7 +170,6 @@ class TopKRouter(BaseRouter):
         expert_indices = torch.full(
             (num_experts, expert_capacity), fill_value=-1, dtype=torch.long, device=probs.device,
         )
-        full_expert_indices = flat_expert_ids.clone()
 
         # for each expert, pick up to 'expert_capacity' tokens in order of highest expert affiniy
         # loop over experts, grouping slots that picked each expert
@@ -194,18 +193,7 @@ class TopKRouter(BaseRouter):
                 expert_probs[e, :keep] = chosen_probs[sorted_idx] # use normalized probs for weighting expert outputs
                 expert_indices[e, :keep] = chosen_token_ids[sorted_idx]
 
-                if keep < num_chosen_tokens: # tokens are dropped
-                    dropped = torch.ones(num_chosen_tokens, dtype=torch.bool)
-                    dropped[sorted_idx] = False
-
-                    # set dropped indices to -1
-                    indices = torch.nonzero(mask).squeeze()
-                    full_expert_indices[indices[dropped]] = num_experts # set dropped tokens to non-existent expert
-
-        reshape expert_ids with dropped indices marked for aux loss
-        full_expert_indices = full_expert_indices.reshape(topk_expert_ids.shape)
-
-        return logits, probs, expert_probs, expert_indices, full_expert_indices
+        return logits, probs, expert_probs, expert_indices
 
 
 class ExpertChoiceRouter(BaseRouter):
@@ -234,7 +222,7 @@ class ExpertChoiceRouter(BaseRouter):
         padding_mask: torch.Tensor,
         k: int, 
         expert_capacity: int
-    ):
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Parameters:
         -----------
