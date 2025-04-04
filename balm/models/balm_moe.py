@@ -226,7 +226,8 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         else:
             aux_loss = router_load_balancing_loss(
                 cat_router_probs,
-                cat_expert_indexes,
+                k=self.config.num_experts_per_tok,
+                attention_mask=None
             )
 
         # outputs

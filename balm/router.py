@@ -174,16 +174,19 @@ class TopKRouter(BaseRouter):
         # for each expert, pick up to 'expert_capacity' tokens in order of highest expert affiniy
         # loop over experts, grouping slots that picked each expert
         for e in range(num_experts):
+            # select token_ids and probs for expert e only
             mask = flat_expert_ids == e
             chosen_token_ids = flat_token_ids[mask]
             chosen_unnorm_probs = flat_unnorm_probs[mask]
             chosen_probs = flat_probs[mask]
 
+            num_chosen_tokens = chosen_token_ids.numel()
+
             # sort by expert affinity
-            if chosen_token_ids.numel() > 0:
+            if num_chosen_tokens > 0:
                 
                 # keep highest unnormalized probs, up to `expert_capacity` tokens per expert
-                keep = min(expert_capacity, chosen_token_ids.size(0))
+                keep = min(expert_capacity, num_chosen_tokens)
                 _, sorted_idx = torch.topk(chosen_unnorm_probs, keep)
 
                 # filter for selected idxs
