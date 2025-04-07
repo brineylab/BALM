@@ -253,9 +253,9 @@ class SwigluFFN(nn.Module):
         activation: str = "swiglu",  # unused, only here for signature compatibility with DenseFFN
     ):
         super().__init__()
-        self.gate_linear = nn.Linear(model_dim, ffn_dim, bias=bias)
-        self.value_linear = nn.Linear(model_dim, ffn_dim, bias=bias)
-        self.wo = nn.Linear(ffn_dim, model_dim, bias=bias)
+        self.gate_linear = nn.Linear(model_dim, ffn_dim, bias=bias) # w1
+        self.value_linear = nn.Linear(model_dim, ffn_dim, bias=bias) # w3
+        self.wo = nn.Linear(ffn_dim, model_dim, bias=bias) # w2
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -349,6 +349,9 @@ class SparseFFN(nn.Module):
         expert_bias: bool = True,
     ):
         super().__init__()
+        self.num_experts = num_experts - num_shared_experts # substract shared experts
+        self.num_shared_experts = num_shared_experts
+        self.k = k
         
         # router
         self.router_type = router_type
@@ -371,7 +374,6 @@ class SparseFFN(nn.Module):
             raise ValueError(f"Invalid router type: {router_type}")
 
         # experts
-        # TODO: implement shared expert(s)
         if expert_activation.lower() == "swiglu":
             expert = partial(
                 SwigluFFN,
@@ -387,11 +389,10 @@ class SparseFFN(nn.Module):
                 bias=expert_bias,
                 activation=expert_activation,
             )
-        self.experts = nn.ModuleList([expert() for _ in range(num_experts)])
-        self.num_experts = num_experts
-        self.k = k
+        self.experts = nn.ModuleList([expert() for _ in range(num_experts)]) # excluding shared expert(s)
+        self.shared_experts = nn.ModuleList([expert() for _ in range(num_shared_experts)])
 
-        # capacity
+        # expert capacity (applied to non-shared experts)
         if expert_capacity < 0:
             self.expert_capacity = -1
         elif expert_capacity_type == "absolute":
@@ -402,7 +403,7 @@ class SparseFFN(nn.Module):
 
     def _compute_multiplier_capacity(self, num_tokens: int) -> int:
         """
-        Determine expert capacity.
+        Determine expert capacity, if capacity multiplier was provided.
 
         Parameters:
         -----------
@@ -470,7 +471,8 @@ class SparseFFN(nn.Module):
         # clone hidden states
         # this passes hidden states unchanged for tokens that aren't sent to any expert
         output = x_flat.clone()
-        # TODO: implement shared expert(s)
+
+        # experts (excluding shared expert)
         for expert_idx, expert in enumerate(self.experts):
             # get token indices and probs for current expert ==> (expert_capacity,)
             token_indices = expert_indices[expert_idx]
@@ -495,6 +497,18 @@ class SparseFFN(nn.Module):
             
             # accumulate expert output
             output[valid_token_indices] += expert_output
+            
+        # shared expert(s)
+        for expert_idx, expert in enumerate(self.shared_experts):
+            # get expert input for all tokens
+            expert_input = x_flat
+            
+            # compute expert output
+            # don't scale by routing probability because not passed through router
+            expert_output = expert(expert_input)
+            
+            # accumulate expert output
+            output += expert_output
 
         output = output.view(batch_size, seq_len, d_model)
         return output, (router_logits, router_probs, expert_probs, expert_indices)

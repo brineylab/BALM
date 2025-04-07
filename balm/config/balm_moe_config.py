@@ -65,11 +65,11 @@ class BalmMoEConfig(PretrainedConfig):
         The pad token id.
 
     num_experts : int, default=8
-        The number of experts in the model.
+        The total number of experts in the model.
+        If there are any shared experts, these experts are included in this total.
     
     num_shared_experts: int, default=0
         The number of shared experts (which receive all tokens) in the model.
-        (TODO: This is NOT implemented yet)
 
     num_experts_per_tok : int, default=1
         The number of experts to route each token to. Only used if `router_type` is ``"topk"``.
@@ -102,7 +102,7 @@ class BalmMoEConfig(PretrainedConfig):
         If "absolute": tokens per expert; if "multiplier": capacity = multiplier * max_position_embeddings
 
     expert_capacity : int, default=1
-        The capacity of each expert.
+        The capacity of each expert, excluding shared experts.
         If `expert_capacity_type` is "absolute", this value is translated as the actual token capacity of each expert.
         If `expert_capacity_type` is "multiplier", this value is translated as the multiplier with which the total
         expert capacity is calculated (i.e. each expert capacity = multiplier * max_position_embeddings / num_experts).
