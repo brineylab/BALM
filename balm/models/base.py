@@ -126,7 +126,8 @@ class ParameterCountMixin:
                 )
 
             # get the necessary config values
-            num_experts = self.config.num_experts
+            num_shared_experts = self.config.num_shared_experts
+            num_experts = self.config.num_experts - num_shared_experts # excluding shared experts
             capacity_type = self.config.expert_capacity_type
             expert_capacity = self.config.expert_capacity
             
@@ -160,8 +161,19 @@ class ParameterCountMixin:
                 router_params = sum(p.numel() for p in moe.router.parameters())
                 total_num_params += router_params
 
+                # shared experts, if any (fully active)
+                if num_shared_experts > 0:
+                    shared_expert_params = sum(
+                        p.numel() 
+                        for p in moe.experts[:num_shared_experts].parameters()
+                    )
+                    total_num_params += shared_expert_params
+
                 # experts (partially active)
-                total_expert_params = sum(p.numel() for p in moe.experts.parameters())
+                total_expert_params = sum(
+                    p.numel() 
+                    for p in moe.experts[num_shared_experts:].parameters()
+                )
                 active_expert_params = total_expert_params * prop_tokens_per_expert
                 total_num_params += active_expert_params             
         # count all parameters
