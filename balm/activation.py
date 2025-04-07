@@ -79,33 +79,14 @@ class SwiGLU(nn.Module):
     """
     SwiGLU activation function.
 
-    .. note::
-        Depending on whether the dimension is provided, the implementation will be different.
-
-        If the dimension is provided, the input tensor will separately processed by two linear layers,
-        and resulting two tensors will be used to compute the SwiGLU activation, like so:
-
-        ```python
-        gate = self.gate_linear(x)
-        value = self.value_linear(x)
-        return value * F.silu(gate)
-        ```
-
-        If the dimension is not provided, the input tensor will be chunked into two tensors,
-        and the resulting two tensors will be used to compute the SwiGLU activation. This results
-        in the output dimension being half of the input dimension, like so:
-
-        ```python
-        value, gate = x.chunk(2, dim=-1)
-        return value + F.silu(gate)
-        ```
-
     Parameters
     ----------
-    dim: int | None
-        Model dimension. If provided, the input tensor will be separately processed by two linear layers.
-        If not provided, the input tensor will be chunked into two tensors, and the resulting two tensors
-        will be used to compute the SwiGLU activation (with the return tensor being half the size of the input tensor).
+    dim: int | None, default=None
+        Model dimension. 
+        If provided, the input tensor will be separately processed by two linear layers.
+        If not provided, the input tensor will be chunked into two tensors, and the 
+        resulting two tensors will be used to compute the SwiGLU activation. This results
+        in the output dimension being half of the input dimension.
 
     Returns
     -------
@@ -114,17 +95,22 @@ class SwiGLU(nn.Module):
 
     """
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        value, gate = x.chunk(2, dim=-1)
-        return value + F.silu(gate)
-    #alternate swiglu
-    '''def __init__(self, in_features, out_features):
+    def __init__(self, dim: int = None):
         super().__init__()
-        self.linear_gate = nn.Linear(in_features, out_features)
-        self.linear = nn.Linear(in_features, out_features)
 
-    def forward(self, x):
-        return F.silu(self.linear_gate(x)) * self.linear(x)'''
+        self.dim = dim
+        if dim is not None:
+            self.value_linear = nn.Linear(dim, dim)
+            self.gate_linear = nn.Linear(dim, dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.dim:
+            value = self.value_linear(x)
+            gate = self.gate_linear(x)
+        else:
+            value, gate = x.chunk(2, dim=-1)
+        
+        return value * F.silu(gate)
 
 
 class GeGLU(nn.Module):
