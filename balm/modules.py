@@ -253,9 +253,9 @@ class SwigluFFN(nn.Module):
         activation: str = "swiglu",  # unused, only here for signature compatibility with DenseFFN
     ):
         super().__init__()
-        self.gate_linear = nn.Linear(model_dim, ffn_dim, bias=bias)
-        self.value_linear = nn.Linear(model_dim, ffn_dim, bias=bias)
-        self.wo = nn.Linear(ffn_dim, model_dim, bias=bias)
+        self.gate_linear = nn.Linear(model_dim, ffn_dim, bias=bias) #w1
+        self.value_linear = nn.Linear(model_dim, ffn_dim, bias=bias) #w3
+        self.wo = nn.Linear(ffn_dim, model_dim, bias=bias) #w2
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -275,8 +275,19 @@ class SwigluFFN(nn.Module):
         gate = self.gate_linear(x)
         value = self.value_linear(x)
         x = value * F.silu(gate)
-        x = self.wo(x)
-        return x
+        x = self.wo(x) #why use wo? what does this do?
+        return x #self.wo(F.silu(self.linear_gate(x)) * self.value_linear(x))
+    #mixtral swiglu
+    '''def __init__(self, args: ModelArgs):
+        super().__init__()
+
+        self.w1 = nn.Linear(args.dim, args.hidden_dim, bias=False) equivalent to gate
+        self.w2 = nn.Linear(args.hidden_dim, args.dim, bias=False) equivalent to wo
+        self.w3 = nn.Linear(args.dim, args.hidden_dim, bias=False) equivalent to linear
+
+    def __call__(self, x) -> mx.array:
+        return self.w2(nn.silu(self.w1(x)) * self.w3(x))
+'''
 
 
 class SparseFFN(nn.Module):
@@ -337,7 +348,7 @@ class SparseFFN(nn.Module):
         model_dim: int,
         ffn_dim: int,
         num_experts: int,
-        num_shared_experts: int,
+        num_shared_experts: int, #make default 0?
         expert_capacity_type: str,
         expert_capacity: Union[int, float],
         k: int = 1,
@@ -356,14 +367,14 @@ class SparseFFN(nn.Module):
         if router_type == "topk":
             self.router = TopKRouter(
                 d_model=model_dim, 
-                num_experts=num_experts,
+                num_experts=(num_experts), #subtract shared experts?, don't pass through router (DeepSeekMOE) but might mess with size of results when returns forward
                 router_bias=router_bias,
                 router_dtype=router_dtype,
             )
         elif router_type == "expert choice":
             self.router = ExpertChoiceRouter(
                 d_model=model_dim, 
-                num_experts=num_experts,
+                num_experts=(num_experts), #subtract shared experts?, don't pass through router (DeepSeekMOE) but might mess with size of results when returns forwar
                 router_bias=router_bias,
                 router_dtype=router_dtype,
             )
@@ -387,8 +398,10 @@ class SparseFFN(nn.Module):
                 bias=expert_bias,
                 activation=expert_activation,
             )
-        self.experts = nn.ModuleList([expert() for _ in range(num_experts)])
-        self.num_experts = num_experts
+        self.experts = nn.ModuleList([expert() for _ in range(num_experts-num_shared_experts)]) #shared expert included in this?
+        self.shared_experts = nn.ModuleList([expert() for _ in range(num_shared_experts)]) #separate shared experts
+        self.num_experts = num_experts-num_shared_experts #substracted shared experts
+        self.num_shared_experts = num_shared_experts #added num_shared_experts to self
         self.k = k
 
         # capacity
@@ -414,7 +427,7 @@ class SparseFFN(nn.Module):
         capacity : int
             Expert capacity.
         """
-        return int(self.capacity_multiplier * num_tokens / self.num_experts)
+        return int(self.capacity_multiplier * num_tokens / self.num_experts) #should shared experts be included in multiplier capacity?
 
     def forward(
         self,
@@ -471,7 +484,7 @@ class SparseFFN(nn.Module):
         # this passes hidden states unchanged for tokens that aren't sent to any expert
         output = x_flat.clone()
         # TODO: implement shared expert(s)
-        for expert_idx, expert in enumerate(self.experts):
+        for expert_idx, expert in enumerate(self.experts): #add separate loop for shared experts
             # get token indices and probs for current expert ==> (expert_capacity,)
             token_indices = expert_indices[expert_idx]
             token_probs = expert_probs[expert_idx]
@@ -495,6 +508,23 @@ class SparseFFN(nn.Module):
             
             # accumulate expert output
             output[valid_token_indices] += expert_output
+            
+        #Shared experts loop
+        for expert_idx, expert in enumerate(self.shared_experts):
+            #don't need token indices and probs for expert because route all tokens
+            
+            #keep all tokens
+            #no valid token indices or probs, because all tokens passed
+            
+            #get expert input
+            expert_input = x_flat
+            
+            #compute expert output
+            #don't scale by routing probability because not passed through router
+            expert_output = expert(expert_input)
+            
+            #accumulate expert output
+            output += expert_output #don't index at valid indices because none
 
         output = output.view(batch_size, seq_len, d_model)
         return output, (router_logits, router_probs, expert_probs, expert_indices)

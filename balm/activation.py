@@ -117,6 +117,14 @@ class SwiGLU(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         value, gate = x.chunk(2, dim=-1)
         return value + F.silu(gate)
+    #alternate swiglu
+    '''def __init__(self, in_features, out_features):
+        super().__init__()
+        self.linear_gate = nn.Linear(in_features, out_features)
+        self.linear = nn.Linear(in_features, out_features)
+
+    def forward(self, x):
+        return F.silu(self.linear_gate(x)) * self.linear(x)'''
 
 
 class GeGLU(nn.Module):
