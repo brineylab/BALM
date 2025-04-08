@@ -20,7 +20,7 @@ __all__ = [
     "SparseTransformerLayer",
     "SparseFFN",
     "DenseFFN",
-    "SwigluFFN",
+    "GluFFN",
     # heads
     "BalmLMHead",
     "BalmSequenceClassificationHead",
@@ -172,7 +172,7 @@ class BalmSequenceClassificationHead(nn.Module):
 
 class DenseFFN(nn.Module):
     """
-    Standard (dense) feed-forward network.
+    Standard (dense) feed-forward network, used for RELU and GELU activations.
 
     Parameters:
     -----------
@@ -198,11 +198,11 @@ class DenseFFN(nn.Module):
         model_dim: int,
         ffn_dim: int = None,
         bias: bool = True,
-        activation: str = "gelu",
+        activation: str,
     ):
         super().__init__()
         self.wi = nn.Linear(model_dim, ffn_dim, bias=bias) # intermediate dense
-        self.activation = get_activation_fn(activation, dim=ffn_dim)
+        self.activation = get_activation_fn(activation)
         self.wo = nn.Linear(ffn_dim, model_dim, bias=bias) # output dense
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -226,9 +226,13 @@ class DenseFFN(nn.Module):
         return x
 
 
-class SwigluFFN(nn.Module):
+class GluFFN(nn.Module):
     """
-    SwiGLU-activated feed-forward network.
+    GLU (dense) feed-forward network, used for GLU, SwiGLU, GeGLU, and ReGLU activations.
+    Replaces the first linear layer and activation with GLU, as described `here`_.
+
+    .. _here:
+        https://arxiv.org/pdf/2002.05202
 
     Parameters:
     -----------
@@ -250,16 +254,20 @@ class SwigluFFN(nn.Module):
         model_dim: int,
         ffn_dim: int = None,
         bias: bool = True,
-        activation: str = "swiglu",  # unused, only here for signature compatibility with DenseFFN
+        activation: str,
     ):
         super().__init__()
-        self.gate_linear = nn.Linear(model_dim, ffn_dim, bias=bias) # w1
-        self.value_linear = nn.Linear(model_dim, ffn_dim, bias=bias) # w3
-        self.wo = nn.Linear(ffn_dim, model_dim, bias=bias) # w2
+        self.activation = get_activation_fn(
+            activation, 
+            input_dim=model_dim, 
+            output_dim=ffn_dim,
+            bias=bias
+        )
+        self.wo = nn.Linear(ffn_dim, model_dim, bias=bias) # output dense
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass for the SwigluFFN layer.
+        Forward pass for the GluFFN layer.
 
         Parameters:
         -----------
@@ -272,9 +280,8 @@ class SwigluFFN(nn.Module):
             Output tensor of shape (batch_size, seq_len, model_dim).
 
         """
-        gate = self.gate_linear(x)
-        value = self.value_linear(x)
-        x = value * F.silu(gate)
+        # activation handles model_dim -> ffn_dim
+        x = self.activation(x)
         x = self.wo(x)
         return x
 
@@ -374,21 +381,14 @@ class SparseFFN(nn.Module):
             raise ValueError(f"Invalid router type: {router_type}")
 
         # experts
-        if expert_activation.lower() == "swiglu":
-            expert = partial(
-                SwigluFFN,
-                model_dim=model_dim,
-                ffn_dim=ffn_dim,
-                bias=expert_bias,
-            )
-        else:
-            expert = partial(
-                DenseFFN,
-                model_dim=model_dim,
-                ffn_dim=ffn_dim,
-                bias=expert_bias,
-                activation=expert_activation,
-            )
+        ffn_class = GluFFN if "glu" in expert_activation else DenseFFN
+        expert = partial(
+            ffn_class,
+            model_dim=model_dim,
+            ffn_dim=ffn_dim,
+            bias=expert_bias,
+            activation=expert_activation,
+        )
         self.experts = nn.ModuleList([expert() for _ in range(self.num_experts)]) # excluding shared expert(s)
         self.shared_experts = nn.ModuleList([expert() for _ in range(num_shared_experts)])
 
@@ -684,7 +684,7 @@ class DenseTransformerLayer(nn.Module):
 
         # FFN
         self.ffn_layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        ffn_class = SwigluFFN if config.activation.lower() == "swiglu" else DenseFFN
+        ffn_class = GluFFN if "glu" in config.activation else DenseFFN
         self.ffn = ffn_class(
             model_dim=config.hidden_size,
             ffn_dim=config.intermediate_size,

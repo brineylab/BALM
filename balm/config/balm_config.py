@@ -182,19 +182,20 @@ class BalmConfig(PretrainedConfig):
         if self.position_embedding_type not in ["rotary", "relative", "absolute"]:
             raise ValueError(
                 f"Invalid positional embedding type: {self.position_embedding_type}. Options are 'rotary', 'relative', or 'absolute'."
-            )
-        if self.activation not in ["swiglu", "relu", "gelu", "glu", "reglu", "geglu"]:
+            ) 
+        # check base activations
+        base_activations = ["gelu", "relu", "glu", "swiglu", "geglu", "reglu"]
+        if self.activation not in base_activations:
             raise ValueError(
-                f"Invalid FFN activation: {self.activation}. Options are 'swiglu', 'relu', 'gelu', 'glu', 'reglu', or 'geglu'."
+                f"Invalid FFN activation: {self.activation}. Options are 'gelu', 'relu', 'glu', 'swiglu', 'geglu', or 'reglu'."
             )
-        if self.classifier_activation not in [
-            "swiglu",
-            "relu",
-            "gelu",
-            "tanh",
-            "reglu",
-            "geglu",
-        ]:
+        # check head activations
+        head_activations = ["tanh", "relu", "gelu"]
+        if self.classifier_activation not in head_activations:
             raise ValueError(
-                f"Invalid classifier activation: {self.classifier_activation}. Options are 'swiglu', 'relu', 'gelu', 'tanh', 'reglu', or 'geglu'."
+                f"Invalid classifier activation: {self.classifier_activation}. Options are 'tanh', 'relu', or 'gelu'."
+            )
+        if self.mlm_activation not in head_activations:
+            raise ValueError(
+                f"Invalid mlm activation: {self.mlm_activation}. Options are 'tanh', 'relu', or 'gelu'."
             )
