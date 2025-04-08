@@ -389,7 +389,7 @@ class SparseFFN(nn.Module):
                 bias=expert_bias,
                 activation=expert_activation,
             )
-        self.experts = nn.ModuleList([expert() for _ in range(num_experts)]) # excluding shared expert(s)
+        self.experts = nn.ModuleList([expert() for _ in range(self.num_experts)]) # excluding shared expert(s)
         self.shared_experts = nn.ModuleList([expert() for _ in range(num_shared_experts)])
 
         # expert capacity (applied to non-shared experts)
