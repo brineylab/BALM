@@ -128,41 +128,6 @@ class BalmSequenceClassificationHead(nn.Module):
         return x
 
 
-# class BalmTokenClassificationHead(nn.Module):
-#     """
-#     Head for token-level classification tasks.
-
-#     Parameters
-#         ----------
-#         config: PretrainedConfig
-#             Model config.
-#     """
-
-#     def __init__(self, config: PretrainedConfig):
-#         super().__init__()
-#         self.dropout = nn.Dropout(config.classifier_dropout)
-#         self.out_proj = nn.Linear(config.hidden_size, config.num_labels)
-
-#     def forward(self, features: torch.Tensor, **kwargs) -> torch.Tensor:
-#         """
-#         BalmTokenClassificationHead forward pass.
-
-#         Parameters
-#         ----------
-#         features : torch.Tensor
-#             Features tensor of shape (batch_size, sequence_length, hidden_size).
-
-#         Returns
-#         -------
-#         x : torch.Tensor
-#             Output tensor of shape (batch_size, sequence_length, num_labels).
-
-#         """
-#         x = self.dropout(features)
-#         x = self.out_proj(x)
-#         return x
-
-
 # =================================
 #
 #             FFNs
