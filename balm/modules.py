@@ -349,7 +349,7 @@ class SparseFFN(nn.Module):
         expert_bias: bool = True,
     ):
         super().__init__()
-        self.num_experts = num_experts - num_shared_experts # substract shared experts
+        self.num_experts = num_experts - num_shared_experts # subtract shared experts
         self.num_shared_experts = num_shared_experts
         self.k = k
         
@@ -359,14 +359,14 @@ class SparseFFN(nn.Module):
         if router_type == "topk":
             self.router = TopKRouter(
                 d_model=model_dim, 
-                num_experts=num_experts,
+                num_experts=self.num_experts,
                 router_bias=router_bias,
                 router_dtype=router_dtype,
             )
         elif router_type == "expert choice":
             self.router = ExpertChoiceRouter(
                 d_model=model_dim, 
-                num_experts=num_experts,
+                num_experts=self.num_experts,
                 router_bias=router_bias,
                 router_dtype=router_dtype,
             )
