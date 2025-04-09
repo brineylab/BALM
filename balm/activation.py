@@ -110,29 +110,3 @@ class GLU(nn.Module):
         value = self.value_linear(x)
         gate = self.gate_linear(x)
         return value * self.activation_fn(gate)
-
-# class GLU(nn.Module):
-#     """
-#     Activation function for GLU variants.
-
-#     Parameters
-#     ----------
-#     in_dim: int
-#         Input dimension.
-#     out_dim: int
-#         Output dimension.
-#     activation: str
-#         Type of GLU variant.
-#     bias: bool
-#         Whether to use bias in linear layers.
-
-#     """
-#     def __init__(self, in_dim: int, out_dim: int, activation: str, bias: bool):
-#         super().__init__()
-#         self.wi = nn.Linear(in_dim, (out_dim*2), bias=bias)
-#         self.activation_fn = GLU_variants[activation]
-
-#     def forward(self, x: torch.Tensor) -> torch.Tensor:
-#         x = self.wi(x)
-#         value, gate = x.chunk(2, dim=-1)
-#         return value * self.activation_fn(gate)
