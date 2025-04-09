@@ -161,8 +161,8 @@ class DenseFFN(nn.Module):
     def __init__(
         self,
         model_dim: int,
-        ffn_dim: int = None,
-        bias: bool = True,
+        ffn_dim: int,
+        bias: bool,
         activation: str,
     ):
         super().__init__()
@@ -217,8 +217,8 @@ class GluFFN(nn.Module):
     def __init__(
         self,
         model_dim: int,
-        ffn_dim: int = None,
-        bias: bool = True,
+        ffn_dim: int,
+        bias: bool,
         activation: str,
     ):
         super().__init__()
