@@ -115,6 +115,7 @@ class SequenceClassifierOutput(BalmModelOutput):
     logits: torch.FloatTensor = None
     hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
     attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
+    classifier_attentions: Optional[torch.FloatTensor] = None
 
 
 @dataclass
@@ -248,3 +249,4 @@ class MoESequenceClassifierOutput(BalmModelOutput):
     z_loss: torch.FloatTensor = None
     aux_loss: torch.FloatTensor = None
     classifier_loss: torch.FloatTensor = None
+    classifier_attentions: Optional[torch.FloatTensor] = None

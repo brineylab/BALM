@@ -121,6 +121,9 @@ class BalmMoEConfig(PretrainedConfig):
 
     mlm_activation: str, default="gelu"
         The activation function to use for the LM head.
+         
+    attention_classifier: bool, default=False
+        Whether to add attention to classification head.
 
     classifier_activation: str, default="tanh"
         The activation function to use for the classifier.
@@ -130,6 +133,9 @@ class BalmMoEConfig(PretrainedConfig):
 
     num_labels : int, default=2
         The number of labels for the classification head (sequence or token classification).
+
+    output_classifier_attentions : bool, default=False
+        Whether to output the classifier attention. Only used if attention_classifier=True.
 
     output_attentions : bool, default=False
         Whether to output the attentions.
@@ -215,9 +221,11 @@ class BalmMoEConfig(PretrainedConfig):
         # mlm
         mlm_activation: str = "gelu",
         # classification
+        attention_classifier: bool = False,
         classifier_activation: str = "tanh",
         classification_freeze_base: bool = True,
         num_labels: int = 2,  # sequence/token-level classification
+        output_classifier_attentions: bool = False,
         # outputs
         output_attentions: bool = False,
         output_hidden_states: bool = False,
@@ -274,9 +282,11 @@ class BalmMoEConfig(PretrainedConfig):
         self.mlm_activation = mlm_activation.lower()
 
         # classification
+        self.attention_classifier = bool(attention_classifier)
         self.classifier_activation = classifier_activation.lower()
         self.classification_freeze_base = bool(classification_freeze_base)
         self.num_labels = int(num_labels)
+        self.output_classifier_attentions = bool(output_classifier_attentions)
 
         # outputs
         self.output_attentions = bool(output_attentions)
@@ -299,7 +309,7 @@ class BalmMoEConfig(PretrainedConfig):
             )
         if self.expert_capacity <= 0 and self.router_type == 'expert choice':
             raise ValueError(
-                "Expert capacity must be a positive integer for the Expert Choice router."
+                f"Invalid expert capacity: {str(self.expert_capacity)}. Expert capacity must be a positive integer for the Expert Choice router."
             )
         # check base activations
         base_activations = ["gelu", "relu", "glu", "swiglu", "geglu", "reglu"]
@@ -320,6 +330,11 @@ class BalmMoEConfig(PretrainedConfig):
         if self.mlm_activation not in head_activations:
             raise ValueError(
                 f"Invalid mlm activation: {self.mlm_activation}. Options are 'tanh', 'relu', or 'gelu'."
+            )
+        # check classifier params
+        if self.attention_classifier == False and self.output_classifier_attentions == True:
+            raise ValueError(
+                "Invalid classifier configuration. Cannot output classifier attentions when attention_classifier is False."
             )
 
     def _standardize_router_type(self, router_type: str) -> str:

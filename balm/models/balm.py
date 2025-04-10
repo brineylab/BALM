@@ -11,6 +11,7 @@ from ..config import BalmConfig
 from ..modules import (
     BalmLMHead, 
     BalmSequenceClassificationHead, 
+    BalmAttentionSequenceClassificationHead,
     DenseTransformerLayer
 )
 from ..outputs import (
@@ -320,6 +321,7 @@ class BalmForSequenceClassification(
     """
     BALM model for sequence classification.
     Uses the BALM encoder and adds a sequence-level classification head.
+    Can be configured with or without an attention block.
 
     Parameters
     ----------
@@ -340,7 +342,14 @@ class BalmForSequenceClassification(
 
         # model
         self.balm = BalmModel(config)
-        self.classifier = BalmSequenceClassificationHead(config)
+        if config.attention_classifier:
+            self.classifier = BalmAttentionSequenceClassificationHead(config)
+        else:
+            if self.config.output_classifier_attentions == True:
+                raise ValueError(
+                    "Invalid classifier configuration. Cannot output classifier attentions when attention_classifier is False."
+                )
+            self.classifier = BalmSequenceClassificationHead(config)
         
         # loss function
         self.criterion = nn.CrossEntropyLoss()
@@ -359,6 +368,7 @@ class BalmForSequenceClassification(
         position_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.Tensor] = None,
+        output_classifier_attentions: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -384,6 +394,9 @@ class BalmForSequenceClassification(
         labels: torch.LongTensor
             Labels
 
+        output_classifier_attentions: bool
+            Whether to output classifier attention weights.
+
         output_attentions: bool
             Whether to output attention weights
 
@@ -394,6 +407,7 @@ class BalmForSequenceClassification(
             Whether to return a dictionary of outputs (returns a tuple if False)
         """
         # parse output options
+        output_classifier_attentions = output_classifier_attentions if output_classifier_attentions is not None else self.config.output_classifier_attentions
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         return_dict = return_dict if return_dict is not None else self.config.return_dict
@@ -414,8 +428,22 @@ class BalmForSequenceClassification(
         )
         x = outputs.last_hidden_state
 
+        # invert attention mask to padding mask and convert to boolean
+        if attention_mask is not None:
+            padding_mask = 1 - attention_mask
+            padding_mask = padding_mask.bool()
+
         # classifier
-        classifier_logits = self.classifier(x)
+        classifier_out = self.classifier(
+            x,
+            padding_mask=padding_mask,
+            need_weights=output_classifier_attentions
+        )
+        if output_classifier_attentions:
+            classifier_logits, classifier_attens = classifier_out
+        else:
+            classifier_logits = classifier_out
+            classifier_attens = None
 
         # classification loss
         classifier_loss = None
@@ -435,6 +463,7 @@ class BalmForSequenceClassification(
                     classifier_logits,
                     outputs.hidden_states,
                     outputs.attentions,
+                    classifier_attens
                 ]
                 if v is not None
             )
@@ -443,4 +472,5 @@ class BalmForSequenceClassification(
             logits=classifier_logits,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
+            classifier_attentions=classifier_attens
         )

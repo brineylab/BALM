@@ -24,7 +24,7 @@ __all__ = [
     # heads
     "BalmLMHead",
     "BalmSequenceClassificationHead",
-    # "BalmTokenClassificationHead",
+    "BalmAttentionSequenceClassificationHead",
 ]
 
 
@@ -94,8 +94,7 @@ class BalmSequenceClassificationHead(nn.Module):
 
     """
 
-    def __init__(self, config: PretrainedConfig
-    ):
+    def __init__(self, config: PretrainedConfig):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.dropout = nn.Dropout(config.hidden_dropout)
@@ -126,6 +125,89 @@ class BalmSequenceClassificationHead(nn.Module):
         x = self.dropout(x)
         x = self.out_proj(x)
         return x
+
+
+class BalmAttentionSequenceClassificationHead(nn.Module):
+    """
+    Head for sequence-level classification tasks. Attention layer is added for 
+    interpretability, as implemented in `this paper`_.
+
+    .. _this paper: 
+        https://doi.org/10.1016/j.immuni.2024.07.022
+
+    Parameters
+    ----------
+    config: PretrainedConfig
+        Model config.
+
+    """
+
+    def __init__(self, config: PretrainedConfig):
+        super().__init__()
+
+        # attention & pooling
+        self.attention = SelfAttention(
+            model_dim=config.hidden_size,
+            num_heads=config.num_attention_heads,
+            dropout=config.attention_dropout,
+            position_embedding_type=config.position_embedding_type,
+        )
+        self.attn_dropout = nn.Dropout(config.attention_dropout)
+        self.layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.avg_pool = nn.AdaptiveAvgPool2d((1, config.hidden_size))
+
+        # FFN
+        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+        self.activation = get_activation_fn(config.classifier_activation)
+        self.dropout = nn.Dropout(config.hidden_dropout)
+
+        # output
+        self.out_proj = nn.Linear(config.hidden_size, config.num_labels)
+
+    def forward(
+        self, 
+        features: torch.Tensor,
+        padding_mask: torch.Tensor,
+        need_weights: bool,
+        **kwargs
+    ) -> torch.Tensor:
+        """
+        BalmAttentionSequenceClassificationHead forward pass.
+
+        Parameters
+        ----------
+        features : torch.Tensor
+            Features tensor of shape (batch_size, sequence_length, hidden_size).
+
+        Returns
+        -------
+        x : torch.Tensor
+            Output tensor of shape (batch_size, num_labels).
+
+        """
+        # attention
+        residual = features
+        attn_out = self.attention(
+            features,
+            padding_mask=padding_mask,
+            need_weights=need_weights
+        )
+        x, attn_vals = attn_out if need_weights else (attn_out[0], None)
+        x = residual + self.attn_dropout(x)
+        x = self.layer_norm(x)
+
+        # avg pooling across sequence length
+        x = self.avg_pool(x)
+        x = torch.flatten(x, start_dim=1)
+
+        # FFN
+        x = self.dense(x)
+        x = self.activation(x)
+        x = self.dropout(x)
+
+        # output
+        x = self.out_proj(x)
+        return (x, attn_vals) if need_weights else x
 
 
 # =================================
