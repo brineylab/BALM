@@ -2,6 +2,11 @@
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
+"""
+Setup for BALM and BALM-MoE models and tokenizers to use Hugging Face's Auto classes.
+See documentation: https://huggingface.co/docs/transformers/en/custom_models#autoclass
+"""
+
 from transformers import (
     AutoConfig,
     AutoTokenizer,
