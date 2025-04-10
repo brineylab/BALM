@@ -38,7 +38,11 @@ class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
     -----------
     config: BalmConfig
         Configuration object defining model architecture and hyperparameters.
+    
     """
+
+    config_class = BalmConfig
+    base_model_prefix = "balm"
 
     def __init__(self, config: BalmConfig):
         super().__init__(config)

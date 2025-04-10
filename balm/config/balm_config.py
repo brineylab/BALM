@@ -125,6 +125,8 @@ class BalmConfig(PretrainedConfig):
 
     """
 
+    model_type = "balm"
+
     def __init__(
         self,
         vocab_size: int = 32,

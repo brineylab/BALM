@@ -193,6 +193,8 @@ class BalmMoEConfig(PretrainedConfig):
 
     """
 
+    model_type = "balm_moe"
+
     def __init__(
         self,
         vocab_size: int = 32,

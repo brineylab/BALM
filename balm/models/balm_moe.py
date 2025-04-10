@@ -40,7 +40,11 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
     -----------
     config: BalmMoEConfig
         Configuration object defining model architecture and hyperparameters.
+    
     """
+
+    config_class = BalmMoEConfig
+    base_model_prefix = "balm_moe"
 
     def __init__(self, config: BalmMoEConfig):
         super().__init__(config)
@@ -271,7 +275,7 @@ class BalmMoEForMaskedLM(
     """
 
     config_class = BalmMoEConfig
-    base_model_prefix = "balm"
+    base_model_prefix = "balm_moe"
 
     def __init__(
         self,
@@ -281,7 +285,7 @@ class BalmMoEForMaskedLM(
         self.config = config
 
         # model
-        self.balm = BalmMoEModel(config)
+        self.balm_moe = BalmMoEModel(config)
         self.lm_head = BalmLMHead(config)
 
         # loss function
@@ -359,7 +363,7 @@ class BalmMoEForMaskedLM(
         return_dict = return_dict if return_dict is not None else self.config.return_dict
 
         # encoder
-        outputs = self.balm(
+        outputs = self.balm_moe(
             input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -438,7 +442,7 @@ class BalmMoEForSequenceClassification(
     """
 
     config_class = BalmMoEConfig
-    base_model_prefix = "balm"
+    base_model_prefix = "balm_moe"
 
     def __init__(
         self,
@@ -448,7 +452,7 @@ class BalmMoEForSequenceClassification(
         self.config = config
 
         # model
-        self.balm = BalmMoEModel(config)
+        self.balm_moe = BalmMoEModel(config)
         if config.attention_classifier:
             self.classifier = BalmAttentionSequenceClassificationHead(config)
         else:
@@ -537,7 +541,7 @@ class BalmMoEForSequenceClassification(
         return_dict = return_dict if return_dict is not None else self.config.return_dict
 
         # encoder
-        outputs = self.balm(
+        outputs = self.balm_moe(
             input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
