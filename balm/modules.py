@@ -148,7 +148,7 @@ class BalmAttentionSequenceClassificationHead(nn.Module):
         # attention & pooling
         self.attention = SelfAttention(
             model_dim=config.hidden_size,
-            num_heads=config.num_attention_heads,
+            num_heads=config.classifier_attention_heads,
             dropout=config.attention_dropout,
             position_embedding_type=config.position_embedding_type,
         )

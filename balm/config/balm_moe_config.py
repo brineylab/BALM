@@ -124,11 +124,14 @@ class BalmMoEConfig(PretrainedConfig):
          
     attention_classifier: bool, default=False
         Whether to add attention to classification head.
+    
+    classifier_attention_heads: bool, default=4
+        Number of attention heads in the classifier.
 
     classifier_activation: str, default="tanh"
         The activation function to use for the classifier.
 
-    classification_freeze_base: bool, default=True
+    classifier_freeze_base: bool, default=True
         Whether to freeze the base weights of classification model. 
 
     num_labels : int, default=2
@@ -222,8 +225,9 @@ class BalmMoEConfig(PretrainedConfig):
         mlm_activation: str = "gelu",
         # classification
         attention_classifier: bool = False,
+        classifier_attention_heads: int = 4,
         classifier_activation: str = "tanh",
-        classification_freeze_base: bool = True,
+        classifier_freeze_base: bool = True,
         num_labels: int = 2,  # sequence/token-level classification
         output_classifier_attentions: bool = False,
         # outputs
@@ -283,8 +287,9 @@ class BalmMoEConfig(PretrainedConfig):
 
         # classification
         self.attention_classifier = bool(attention_classifier)
+        self.classifier_attention_heads = int(classifier_attention_heads)
         self.classifier_activation = classifier_activation.lower()
-        self.classification_freeze_base = bool(classification_freeze_base)
+        self.classifier_freeze_base = bool(classifier_freeze_base)
         self.num_labels = int(num_labels)
         self.output_classifier_attentions = bool(output_classifier_attentions)
 

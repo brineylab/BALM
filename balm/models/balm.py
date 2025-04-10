@@ -358,7 +358,7 @@ class BalmForSequenceClassification(
         self.init_weights()
 
         # freeze base model weights
-        if config.classification_freeze_base:
+        if config.classifier_freeze_base:
             self.freeze_base_model()
 
     def forward(

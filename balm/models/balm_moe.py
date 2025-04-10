@@ -472,7 +472,7 @@ class BalmMoEForSequenceClassification(
 
         # freeze base model weights
         # and zero out router loss coeffs
-        if config.classification_freeze_base:
+        if config.classifier_freeze_base:
             self.freeze_base_model()
 
     def forward(
