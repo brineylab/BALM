@@ -25,8 +25,9 @@ class BalmConfig(PretrainedConfig):
     num_attention_heads : int, default=20
         The number of attention heads in the model.
 
-    intermediate_size : int, default=1280
+    intermediate_size : int, default=None
         The intermediate size of the model.
+        If not provided, defaults to (`hidden_size` * 4).
 
     activation : str, default="swiglu"
         The activation function to use for the model.
@@ -35,11 +36,13 @@ class BalmConfig(PretrainedConfig):
         The dropout probability for the model. Can be overridden
         by `attention_dropout`, `hidden_dropout`, and `expert_dropout`.
 
-    attention_dropout : float, default=0.1
+    attention_dropout : float, default=None
         The dropout probability for the attention layers.
+        If not provided, defaults to `dropout`.
 
-    hidden_dropout : float, default=0.1
+    hidden_dropout : float, default=None
         The dropout probability for the hidden layers.
+        If not provided, defaults to `dropout`.
     
     ffn_bias : bool, default=True
         Whether to use a bias for FFN layers.
@@ -69,8 +72,10 @@ class BalmConfig(PretrainedConfig):
     attention_classifier: bool, default=False
         Whether to add attention to classification head.
     
-    classifier_attention_heads: bool, default=4
-        Number of attention heads in the classifier.
+    classifier_attention_heads: int, default=None
+        Number of attention heads in the classifier. 
+        If not provided, defaults to `num_attention_heads`.
+        Only used if `attention_classifier` is True.
 
     classifier_activation: str, default="tanh"
         The activation function to use for the classifier.
@@ -82,13 +87,14 @@ class BalmConfig(PretrainedConfig):
         The number of labels for the classification head (sequence or token classification).
     
     output_classifier_attentions : bool, default=False
-        Whether to output the classifier attention. Only used if attention_classifier=True.
+        Whether to output the classifier attention. 
+        Only used if `attention_classifier` is True.
 
     output_attentions : bool, default=False
         Whether to output the attentions.
 
         .. warning::
-            If ``output_attentions`` is ``True``, torch can't use optimized SDPA.
+            If `output_attentions` is True, torch can't use optimized SDPA.
             See `here`_ for more details.
 
     output_hidden_states : bool, default=False
@@ -101,7 +107,7 @@ class BalmConfig(PretrainedConfig):
         Whether to use the cache.
 
     **kwargs : dict, optional
-        Additional keyword arguments are passed to the parent class (transformers.PretrainedConfig).
+        Additional keyword arguments are passed to the parent class (`transformers.PretrainedConfig`).
 
     Raises
     ------
@@ -109,7 +115,10 @@ class BalmConfig(PretrainedConfig):
         If the positional embedding type is not valid.
 
     ValueError
-        If the FFN or classifier activation functions are not valid.
+        If the FFN, mlm, or classifier activation functions are not valid.
+    
+    ValueError
+        If the classifier config is not valid.
 
     .. _here:
         https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html#torch.nn.MultiheadAttention.forward
@@ -138,7 +147,7 @@ class BalmConfig(PretrainedConfig):
         mlm_activation: str = "gelu",
         # classification
         attention_classifier: bool = False,
-        classifier_attention_heads: int = 4,
+        classifier_attention_heads: Optional[int] = None,
         classifier_activation: str = "tanh",
         classifier_freeze_base: bool = True,
         num_labels: int = 2,  # sequence/token-level classification
@@ -179,7 +188,9 @@ class BalmConfig(PretrainedConfig):
 
         # classification
         self.attention_classifier = bool(attention_classifier)
-        self.classifier_attention_heads = int(classification_attention_heads)
+        self.classifier_attention_heads = int(
+            classifier_attention_heads if classifier_attention_heads is not None else num_attention_heads
+        )
         self.classifier_activation = classifier_activation.lower()
         self.classifier_freeze_base = bool(classifier_freeze_base)
         self.num_labels = int(num_labels)
