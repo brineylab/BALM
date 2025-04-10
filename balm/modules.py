@@ -41,23 +41,18 @@ class BalmLMHead(nn.Module):
 
     Parameters
     ----------
-    hidden_size : int
-        Hidden size.
-
-    output_dim : int
-        Output dimension.
-
-    activation : str, optional
-        Activation function to use. The default is "gelu".
+    config: PretrainedConfig
+        Model config.
 
     """
 
-    def __init__(self, config):
+    def __init__(self, config: PretrainedConfig):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.activation = get_activation_fn(config.mlm_activation)
         self.layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
+        # output
         self.decoder = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.bias = nn.Parameter(torch.zeros(config.vocab_size))
 
@@ -96,12 +91,14 @@ class BalmSequenceClassificationHead(nn.Module):
 
     def __init__(self, config: PretrainedConfig):
         super().__init__()
+        
+        # FFN
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-        self.dropout = nn.Dropout(config.hidden_dropout)
-        self.out_proj = nn.Linear(config.hidden_size, config.num_labels)
-
-        # activation
         self.activation = get_activation_fn(config.classifier_activation)
+        self.dropout = nn.Dropout(config.hidden_dropout)
+
+        # output
+        self.out_proj = nn.Linear(config.hidden_size, config.num_labels)
 
     def forward(self, features: torch.Tensor, **kwargs) -> torch.Tensor:
         """
@@ -123,7 +120,7 @@ class BalmSequenceClassificationHead(nn.Module):
         x = self.dense(x)
         x = self.activation(x)
         x = self.dropout(x)
-        x = self.out_proj(x)
+        x = self.out_proj(x) # proj to num_labels
         return x
 
 
@@ -205,8 +202,7 @@ class BalmAttentionSequenceClassificationHead(nn.Module):
         x = self.activation(x)
         x = self.dropout(x)
 
-        # output
-        x = self.out_proj(x)
+        x = self.out_proj(x) # proj to num_labels
         return (x, attn_vals) if need_weights else x
 
 
@@ -226,17 +222,14 @@ class DenseFFN(nn.Module):
     model_dim: int
         Token embedding dimension.
 
-    ffn_dim: int, default=None
+    ffn_dim: int
         Feed-forward network dimension. If not provided, it will be set to 4x the model dimension.
 
-    activation: str, default="gelu"
-        Activation function to use.
-    
-    bias: bool, default=True
+    bias: bool
         Whether to use bias.
 
-    Input shape: (batch_size, seq_len, model_dim)
-    Output shape: (batch_size, seq_len, model_dim)
+    activation: str
+        Activation function to use.
 
     """
 
@@ -287,13 +280,14 @@ class GluFFN(nn.Module):
         Token embedding dimension.
 
     ffn_dim: int, default=None
-        Feed-forward network dimension. If not provided, it will be set to 4x the model dimension.
+        Feed-forward network dimension.
 
     bias: bool, default=True
         Whether to use bias.
 
-    Input shape: (batch_size, seq_len, model_dim)
-    Output shape: (batch_size, seq_len, model_dim)
+    activation: str
+        Activation function to use.
+
     """
 
     def __init__(
@@ -345,9 +339,6 @@ class SparseFFN(nn.Module):
     ffn_dim: int, default=None
         Feed-forward network dimension. If not provided, it will be set to 4x the model dimension.
 
-    expert_bias: bool, default=True
-        Whether to use bias in the expert FFN.
-
     num_experts: int
         Number of experts.
     
@@ -382,8 +373,6 @@ class SparseFFN(nn.Module):
     expert_bias: bool, default=True
         Whether to use bias in the experts.
 
-    Input shape: (batch_size, seq_len, model_dim)
-    Output shape: (batch_size, seq_len, model_dim)
     """
 
     def __init__(
@@ -461,6 +450,7 @@ class SparseFFN(nn.Module):
         --------
         capacity : int
             Expert capacity.
+        
         """
         return int(self.capacity_multiplier * num_tokens / self.num_experts)
 
@@ -491,6 +481,7 @@ class SparseFFN(nn.Module):
                 Router logits of shape (batch_size, seq_len, num_experts).
             - router_indices : torch.Tensor
                 Router indices of shape (batch_size, seq_len, num_experts).
+        
         """
         batch_size, seq_len, d_model = x.shape
         num_tokens = batch_size * seq_len
@@ -499,9 +490,8 @@ class SparseFFN(nn.Module):
         if self.training and self.router_jitter > 0:
             x *= torch.empty_like(x).uniform_(1.0 - self.router_jitter, 1.0 + self.router_jitter)
 
-        # flatten logits & padding mask
+        # flatten logits
         x_flat = x.view(-1, d_model)  # ==> (num_tokens, d_model)
-        padding_flat = padding_mask.view(-1) if padding_mask is not None else None
 
         # expert capacity
         capacity = self._compute_multiplier_capacity(num_tokens) if self.expert_capacity is None else self.expert_capacity
@@ -510,7 +500,6 @@ class SparseFFN(nn.Module):
         # probs and indices are shape (num_experts, expert_capacity)
         router_logits, router_probs, expert_probs, expert_indices = self.router(
             x_flat, 
-            padding_mask=padding_flat,
             k=self.k, 
             expert_capacity=capacity,
         )
@@ -586,6 +575,7 @@ class SelfAttention(nn.Module):
     position_embedding_type: str, default="rotary"
         Position embedding type. Only used if rotary embeddings are specified
         (i.e. `position_embedding_type="rotary"`).
+    
     """
 
     def __init__(
@@ -712,9 +702,6 @@ class DenseTransformerLayer(nn.Module):
     config: PretrainedConfig
         Model config.
 
-    Input shape: (batch_size, seq_len, model_dim)
-    Output shape: (batch_size, seq_len, model_dim)
-
     """
 
     def __init__(self, config: PretrainedConfig):
@@ -768,8 +755,8 @@ class DenseTransformerLayer(nn.Module):
         --------
         x: torch.Tensor
             Output tensor of shape (batch_size, seq_len, model_dim)
+        
         """
-
         # invert padding mask and convert to boolean, since the 🤗 DataCollatorForLanguageModeling
         # uses 0 for padding tokens and 1 for other tokens, but we want True for padding tokens and
         # False for other tokens
@@ -806,8 +793,6 @@ class SparseTransformerLayer(nn.Module):
     config: PretrainedConfig
         Model config.
 
-    Input shape: (batch_size, seq_len, d_model)
-    Output shape: (batch_size, seq_len, d_model)
     """
 
     def __init__(self, config: PretrainedConfig):
@@ -870,6 +855,7 @@ class SparseTransformerLayer(nn.Module):
         --------
         x: torch.Tensor
             Output tensor of shape (batch_size, seq_len, d_model)
+
         """
         # invert padding mask and convert to boolean, since the 🤗 DataCollatorForLanguageModeling
         # uses 0 for padding tokens and 1 for other tokens, but we want True for padding tokens and

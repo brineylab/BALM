@@ -562,10 +562,10 @@ class BalmMoEForSequenceClassification(
             need_weights=output_classifier_attentions
         )
         if output_classifier_attentions:
-            classifier_logits, classifier_attens = classifier_out
+            classifier_logits, classifier_attn = classifier_out
         else:
             classifier_logits = classifier_out
-            classifier_attens = None
+            classifier_attn = None
 
         # loss
         loss, z_loss, aux_loss, classifier_loss = None, None, None, None
@@ -600,7 +600,7 @@ class BalmMoEForSequenceClassification(
                     aux_loss,
                     z_loss,
                     classifier_loss,
-                    classifier_attens
+                    classifier_attn
                 ]
                 if v is not None
             )
@@ -614,5 +614,5 @@ class BalmMoEForSequenceClassification(
             z_loss=z_loss,
             aux_loss=aux_loss,
             classifier_loss=classifier_loss,
-            classifier_attentions=classifier_attens
+            classifier_attentions=classifier_attn
         )

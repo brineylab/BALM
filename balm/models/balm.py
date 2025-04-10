@@ -440,10 +440,10 @@ class BalmForSequenceClassification(
             need_weights=output_classifier_attentions
         )
         if output_classifier_attentions:
-            classifier_logits, classifier_attens = classifier_out
+            classifier_logits, classifier_attn = classifier_out
         else:
             classifier_logits = classifier_out
-            classifier_attens = None
+            classifier_attn = None
 
         # classification loss
         classifier_loss = None
@@ -463,7 +463,7 @@ class BalmForSequenceClassification(
                     classifier_logits,
                     outputs.hidden_states,
                     outputs.attentions,
-                    classifier_attens
+                    classifier_attn
                 ]
                 if v is not None
             )
@@ -472,5 +472,5 @@ class BalmForSequenceClassification(
             logits=classifier_logits,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
-            classifier_attentions=classifier_attens
+            classifier_attentions=classifier_attn
         )
