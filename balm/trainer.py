@@ -2,40 +2,152 @@
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
+# Inspired by: https://github.com/naba89/custom_hf_trainer/
+
+from typing import Dict, List, Optional
+
+import torch
 from transformers import Trainer
 
-__all__ = ["LossLoggingTrainer"]
+from transformers import (
+    Trainer, 
+    TrainerCallback, 
+    TrainingArguments, 
+    TrainerState, 
+    TrainerControl,
+    is_torch_xla_available, 
+    EvalPrediction
+)
+from transformers.trainer_utils import SaveStrategy
+
+if is_torch_xla_available():
+    import torch_xla.core.xla_model as xm
+    import torch_xla.debug.metrics as met
+
+__all__ = ["MoETrainer"]
 
 
-class LossLoggingTrainer(Trainer):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.state.custom_log_cache = {} 
+loss_mapping = {
+    "topk": ["lm_loss", "aux_loss", "z_loss"],
+    "expert choice": ["lm_loss", "z_loss"]
+}
 
-    def compute_loss(self, model, inputs, return_outputs=False):
-        # forward pass
-        outputs = model(**inputs)
 
-        # leave loss untouched
-        loss = outputs.loss
+class AddExtraLossesToTrainerState(TrainerCallback):
+    def __init__(self, extra_losses: List[str]):
+        self.extra_losses = extra_losses
 
-        # mean losses across batch
-        loss_manual = loss.mean()
-        lm_loss = outputs.lm_loss.mean()
-        z_loss = outputs.z_loss.mean()
-        aux_loss = outputs.aux_loss.mean() if outputs.aux_loss is not None else None
+    def on_train_begin(
+        self, args: TrainingArguments, state: TrainerState, control: TrainerControl,  **kwargs
+    ):
+        control.extra_losses = {k: torch.tensor(0.0).to(args.device) for k in self.extra_losses}
+        return control
 
-        self.state.custom_log_cache = {
-            "loss_manual": loss_manual.item(),
-            "lm_loss": lm_loss.item(),
-            "z_loss": z_loss.item(),
-        }
-        if aux_loss is not None:
-            self.state.custom_log_cache["aux_loss"] = aux_loss.item()
 
-        return (loss, outputs) if return_outputs else loss
+class MoETrainer(Trainer):
+    """
+    Custom Trainer to support logging MoE loss components (lm_loss, aux_loss, and z_loss)
+    during training and evaluation.
+    """
+    def __init__(self, extra_losses: Optional[List[str]] = None, **kwargs):
+        super().__init__(**kwargs)
+
+        # extra_losses based on router type (if not provided)
+        self.router_type = self.model.config.router_type
+        extra_losses = loss_mapping[self.router_type] if extra_losses is None else extra_losses
+
+        # add callback for logging extra train losses
+        self.add_callback(AddExtraLossesToTrainerState(extra_losses))
+        
+        # provide compute metrics (if not provided) for logging extra eval losses
+        if self.compute_metrics is None:
+            self.compute_metrics = self._compute_metrics
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        if hasattr(self.control, 'extra_losses') and model.training:
+
+            loss, outputs = super().compute_loss(model, inputs, return_outputs=True)
+
+            if not isinstance(outputs, dict):
+                raise ValueError("The model output should be a dictionary or ModelOutput and not a tuple or list.")
+            
+            # extract extra losses from outputs
+            for k, v in outputs.items():
+                if k in self.control.extra_losses:
+                    if v is not None:
+                        if self.args.n_gpu > 1:
+                            v = v.mean()
+                        self.control.extra_losses[k] += v.detach() / self.args.gradient_accumulation_steps
+
+            return (loss, outputs) if return_outputs else loss
+        else:
+            return super().compute_loss(model, inputs, return_outputs=return_outputs)
     
-    def log(self, logs):
-        if self.model.training:
-            logs.update(self.state.custom_log_cache) # merge trainer's logs with custom losses
-        super().log(logs)
+    def _maybe_log_save_evaluate(
+        self, tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval, start_time, learning_rate=None
+    ):
+        if self.control.should_log and self.state.global_step > self._globalstep_last_logged:
+            if is_torch_xla_available():
+                xm.mark_step()
+
+            logs: Dict[str, float] = {}
+
+            # all_gather + mean() to get average loss over all processes
+            tr_loss_scalar = self._nested_gather(tr_loss).mean().item()
+
+            # reset tr_loss to zero
+            tr_loss -= tr_loss
+
+            logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
+            if grad_norm is not None:
+                logs["grad_norm"] = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else grad_norm
+            if learning_rate is not None:
+                logs["learning_rate"] = learning_rate
+            else:
+                logs["learning_rate"] = self._get_learning_rate()
+
+            # added to log extra losses
+            if hasattr(self.control, 'extra_losses'):
+                for k, v in self.control.extra_losses.items():
+                    logs[k] = self._nested_gather(v).mean().item()
+                    # reset the loss
+                    self.control.extra_losses[k] -= self.control.extra_losses[k]
+
+                    logs[k] = round(logs[k] / (self.state.global_step - self._globalstep_last_logged), 4)
+
+            self._total_loss_scalar += tr_loss_scalar
+            self._globalstep_last_logged = self.state.global_step
+            self.store_flos()
+
+            self.log(logs, start_time)
+
+        metrics = None
+        if self.control.should_evaluate:
+            metrics = self._evaluate(trial, ignore_keys_for_eval)
+            is_new_best_metric = self._determine_best_metric(metrics=metrics, trial=trial)
+
+            if self.args.save_strategy == SaveStrategy.BEST:
+                self.control.should_save = is_new_best_metric
+
+        if self.control.should_save:
+            self._save_checkpoint(model, trial)
+            self.control = self.callback_handler.on_save(self.args, self.state, self.control)
+
+    def _compute_metrics(self, eval_pred: EvalPrediction):
+        predictions, labels = eval_pred
+        
+        metrics = {}
+        if isinstance(predictions, tuple):
+            # top k
+            if self.router_type == "topk" and len(predictions) == 4:
+                _, aux_loss, z_loss, lm_loss = predictions
+                metrics['lm_loss'] = lm_loss.mean()
+                metrics['aux_loss'] = aux_loss.mean()
+                metrics['z_loss'] = z_loss.mean()
+            # expert choice
+            elif self.router_type == "expert choice" and len(predictions) == 3: 
+                _, z_loss, lm_loss = predictions
+                metrics['lm_loss'] = lm_loss.mean()
+                metrics['z_loss'] = z_loss.mean()      
+
+        return metrics
