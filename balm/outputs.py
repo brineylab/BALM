@@ -109,6 +109,10 @@ class SequenceClassifierOutput(BalmModelOutput):
 
     attentions : Optional[Tuple[torch.FloatTensor, ...]]
         The attention weights tensor. The shape is (batch_size, num_heads, sequence_length, sequence_length).
+    
+    classifier_attentions : Optional[Tuple[torch.FloatTensor, ...]]
+        The classifier attention weights tensor. The shape is (batch_size, num_heads, sequence_length, sequence_length).
+    
     """
 
     loss: Optional[torch.FloatTensor] = None
@@ -237,6 +241,9 @@ class MoESequenceClassifierOutput(BalmModelOutput):
 
     classifier_loss : torch.FloatTensor
         The classifier loss tensor. The shape is (1,).
+    
+    classifier_attentions : Optional[Tuple[torch.FloatTensor, ...]]
+        The classifier attention weights tensor. The shape is (batch_size, num_heads, sequence_length, sequence_length).
 
     """
 
