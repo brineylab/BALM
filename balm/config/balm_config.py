@@ -77,8 +77,9 @@ class BalmConfig(PretrainedConfig):
         If not provided, defaults to `num_attention_heads`.
         Only used if `attention_classifier` is True.
 
-    classifier_activation: str, default="tanh"
-        The activation function to use for the classifier.
+    classifier_activation: str, default=None
+        The activation function to use for the classifier. If None, defaults to 
+        "relu" when `attention_classifier` is True and "tanh" otherwise.
 
     classifier_freeze_base: bool, default=True
         Whether to freeze the base weights of classification model. 
@@ -150,7 +151,7 @@ class BalmConfig(PretrainedConfig):
         # classification
         attention_classifier: bool = False,
         classifier_attention_heads: Optional[int] = None,
-        classifier_activation: str = "tanh",
+        classifier_activation: Optional[str] = None,
         classifier_freeze_base: bool = True,
         num_labels: int = 2,  # sequence/token-level classification
         output_classifier_attentions: bool = False,
@@ -193,7 +194,10 @@ class BalmConfig(PretrainedConfig):
         self.classifier_attention_heads = int(
             classifier_attention_heads if classifier_attention_heads is not None else num_attention_heads
         )
-        self.classifier_activation = classifier_activation.lower()
+        self.classifier_activation = self._get_classifier_activation(
+            activation=classifier_activation, 
+            use_attention=self.attention_classifier
+        )
         self.classifier_freeze_base = bool(classifier_freeze_base)
         self.num_labels = int(num_labels)
         self.output_classifier_attentions = bool(output_classifier_attentions)
@@ -232,3 +236,8 @@ class BalmConfig(PretrainedConfig):
             raise ValueError(
                 "Invalid classifier configuration. Cannot output classifier attentions when attention_classifier is False."
             )
+    
+    def _get_classifier_activation(self, activation: Optional[str], use_attention: bool) -> str:
+        if activation is None:
+            return "relu" if use_attention else "tanh"
+        return activation.lower()
