@@ -407,8 +407,8 @@ class BalmMoEForMaskedLM(
                     outputs.attentions,
                     outputs.router_logits,
                     outputs.expert_indexes,
-                    aux_loss,
                     z_loss,
+                    aux_loss,
                     lm_loss,
                 ]
                 if v is not None
@@ -601,8 +601,8 @@ class BalmMoEForSequenceClassification(
                     outputs.attentions,
                     outputs.router_logits,
                     outputs.expert_indexes,
-                    aux_loss,
                     z_loss,
+                    aux_loss,
                     classifier_loss,
                     classifier_attn
                 ]

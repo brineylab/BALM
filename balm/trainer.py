@@ -140,10 +140,10 @@ class MoETrainer(Trainer):
         if isinstance(predictions, tuple):
             # top k
             if self.router_type == "topk" and len(predictions) == 4:
-                _, aux_loss, z_loss, lm_loss = predictions
+                _, z_loss, aux_loss, lm_loss = predictions
                 metrics['lm_loss'] = lm_loss.mean()
-                metrics['aux_loss'] = aux_loss.mean()
                 metrics['z_loss'] = z_loss.mean()
+                metrics['aux_loss'] = aux_loss.mean()
             # expert choice
             elif self.router_type == "expert choice" and len(predictions) == 3: 
                 _, z_loss, lm_loss = predictions
