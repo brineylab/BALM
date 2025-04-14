@@ -601,10 +601,10 @@ class BalmMoEForSequenceClassification(
                     outputs.attentions,
                     outputs.router_logits,
                     outputs.expert_indexes,
+                    classifier_attn,
                     z_loss,
                     aux_loss,
                     classifier_loss,
-                    classifier_attn
                 ]
                 if v is not None
             )
@@ -615,8 +615,8 @@ class BalmMoEForSequenceClassification(
             attentions=outputs.attentions,
             router_logits=outputs.router_logits,
             expert_indexes=outputs.expert_indexes,
+            classifier_attentions=classifier_attn,
             z_loss=z_loss,
             aux_loss=aux_loss,
             classifier_loss=classifier_loss,
-            classifier_attentions=classifier_attn
         )

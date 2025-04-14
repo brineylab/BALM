@@ -151,7 +151,6 @@ class BalmAttentionSequenceClassificationHead(nn.Module):
         )
         self.attn_dropout = nn.Dropout(config.attention_dropout)
         self.layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.avg_pool = nn.AdaptiveAvgPool2d((1, config.hidden_size))
 
         # FFN
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
@@ -194,7 +193,7 @@ class BalmAttentionSequenceClassificationHead(nn.Module):
         x = self.layer_norm(x)
 
         # avg pooling across sequence length
-        x = self.avg_pool(x)
+        x = x.mean(dim=1)
         x = torch.flatten(x, start_dim=1)
 
         # FFN
