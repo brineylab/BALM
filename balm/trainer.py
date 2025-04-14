@@ -113,7 +113,7 @@ class MoETrainer(Trainer):
                     # reset the loss
                     self.control.extra_losses[k] -= self.control.extra_losses[k]
 
-                    logs[k] = round(logs[k] / (self.state.global_step - self._globalstep_last_logged), 4)
+                    logs[k] = logs[k] / (self.state.global_step - self._globalstep_last_logged)
 
             self._total_loss_scalar += tr_loss_scalar
             self._globalstep_last_logged = self.state.global_step
