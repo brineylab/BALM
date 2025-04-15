@@ -20,10 +20,8 @@ def apply_rotary_emb(q_or_k, sin, cos):
     ----------
     q_or_k: torch.Tensor
         The input tensor. Expected shape is (batch_size, seq_len, num_heads, head_dim).
-
     sin: torch.Tensor
         The sine of the positional embeddings.
-
     cos: torch.Tensor
         The cosine of the positional embeddings.
 
@@ -32,8 +30,8 @@ def apply_rotary_emb(q_or_k, sin, cos):
     torch.Tensor
         The input tensor with rotary positional embeddings applied.
         The shape is (batch_size, seq_len, num_heads, head_dim).
-
     """
+
     q1, q2 = q_or_k.chunk(2, dim=-1)  # ==> (..., head_dim/2)
     return torch.cat([q1 * cos - q2 * sin, q2 * cos + q1 * sin], dim=-1)
 
@@ -47,10 +45,11 @@ class RotaryPositionalEmbedding(nn.Module):
     ----------
     dim: int
         The embedding dimension.
-
     base: int
         The base of the exponential function.
 
+    References
+    ----------
     .. _RoFormer: Enhanced Transformer with Rotary Position Embeddings:
         https://arxiv.org/abs/2104.09864
     """

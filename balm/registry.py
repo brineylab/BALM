@@ -12,19 +12,15 @@ from transformers import (
     AutoTokenizer,
     AutoModel,
     AutoModelForMaskedLM,
-    AutoModelForSequenceClassification
+    AutoModelForSequenceClassification,
 )
 
-from .models.balm import (
-    BalmModel,
-    BalmForMaskedLM,
-    BalmForSequenceClassification
-)
+from .models.balm import BalmModel, BalmForMaskedLM, BalmForSequenceClassification
 from .config.balm_config import BalmConfig
 from .models.balm_moe import (
     BalmMoEModel,
     BalmMoEForMaskedLM,
-    BalmMoEForSequenceClassification
+    BalmMoEForSequenceClassification,
 )
 from .config.balm_moe_config import BalmMoEConfig
 from .tokenizer import BalmTokenizer
@@ -37,10 +33,15 @@ AutoTokenizer.register("balm_moe", fast_tokenizer_class=BalmTokenizer)
 AutoConfig.register("balm", BalmConfig)
 AutoModel.register(BalmConfig, BalmModel)
 AutoModelForMaskedLM.register(BalmConfig, BalmForMaskedLM)
-AutoModelForSequenceClassification.register(BalmConfig, BalmForSequenceClassification)
+AutoModelForSequenceClassification.register(
+    BalmConfig, 
+    BalmForSequenceClassification
+)
 
 # BALM MoE
 AutoConfig.register("balm_moe", BalmMoEConfig)
 AutoModel.register(BalmMoEConfig, BalmMoEModel)
 AutoModelForMaskedLM.register(BalmMoEConfig, BalmMoEForMaskedLM)
-AutoModelForSequenceClassification.register(BalmMoEConfig, BalmMoEForSequenceClassification)
+AutoModelForSequenceClassification.register(
+    BalmMoEConfig, BalmMoEForSequenceClassification
+)

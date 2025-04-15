@@ -27,28 +27,23 @@ class BalmTokenizer(PreTrainedTokenizerFast):
     ----------
     vocab_file: str, optional
         Path to the vocabulary file. If not provided, the default vocabulary is used.
-
     bos_token: str, optional
         Beginning of sequence token. Default is "<cls>".
-
     eos_token: str, optional
         End of sequence token. Default is "<eos>".
-
     unk_token: str, optional
         Unknown token. Default is "<unk>".
-
     pad_token: str, optional
         Padding token. Default is "<pad>".
-
     mask_token: str, optional
         Mask token. Default is "<mask>".
 
     Any additional keyword arguments are passed to the `PreTrainedTokenizerFast` constructor.
 
-
+    Notes
+    -----
     .. _multiple of 8:
         https://developer.nvidia.com/blog/optimizing-gpu-performance-tensor-cores/#:~:text=Simply%20padding%20the%20vocabulary%20size,performance%20of%20the%20projection%20layer.
-
     """
 
     model_input_names = ["input_ids", "attention_mask"]

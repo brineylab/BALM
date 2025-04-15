@@ -21,11 +21,11 @@ __all__ = ["BalmPreTrainedModel", "FreezeBaseModelMixin", "ParameterCountMixin"]
 
 class BalmPreTrainedModel(PreTrainedModel):
     """
-    Handles weight initialization and provides an interface for downloading 
-    and loading pretrained models. Inherits from `PreTrainedModel` in 
+    Handles weight initialization and provides an interface for downloading
+    and loading pretrained models. Inherits from `PreTrainedModel` in
     HuggingFace Transformers.
-
     """
+
     supports_gradient_checkpointing = True
 
     # Copied from transformers.models.bert.modeling_bert.BertPreTrainedModel._init_weights
@@ -52,8 +52,8 @@ class FreezeBaseModelMixin:
 
     This is utilized in the SequenceClassification models, to train only the
     classifier head while keeping the base model frozen.
-
     """
+
     def freeze_base_model(self, base_model: Optional[str] = None):
         if base_model is None:
             if not hasattr(self.__class__, "base_model_prefix"):
@@ -85,8 +85,8 @@ class ParameterCountMixin:
       - All parameters
       - Only trainable parameters
       - Only active parameters (for MoE models)
-
     """
+
     def count_parameters(
         self,
         only_trainable: bool = True,
@@ -100,20 +100,16 @@ class ParameterCountMixin:
 
         Parameters
         ----------
-        only_trainable : bool, optional, default=`True`
+        only_trainable : bool, default=`True`
             Whether or not to return only the number of trainable parameters
-
-        only_active: bool, optional, default=`False`
+        only_active: bool, default=`False`
             Whether or not to return only the number of active parameters.
             Raises ValueError if no MoE layers are found.
-        
-        num_tokens: int, optional, default=0
+        num_tokens: int, default=0
             The number of tokens processed per batch.
-
-        exclude_embeddings : bool, optional, default=`False`
+        exclude_embeddings : bool, default=`False`
             Whether or not to return only the number of non-embeddings parameters
-
-        human_readable : bool, optional, default=`False`
+        human_readable : bool, default=`False`
             Whether or not to return the number of parameters in a human-readable format
 
         Returns
@@ -121,7 +117,6 @@ class ParameterCountMixin:
         int or str
             The number of parameters. If `human_readable` is `True`, the number of parameters
             will be returned as a string in a human-readable format.
-        
         """
 
         # check if embeddings should be excluded
@@ -133,34 +128,36 @@ class ParameterCountMixin:
             ]
         else:
             exclude_param_names = []
-    
+
         # count only active parameters
-        if only_active: 
+        if only_active:
             # locate MoE layers
-            moe_layers = [module for module in self.modules() if isinstance(module, SparseFFN)]
+            moe_layers = [
+                module for module in self.modules() if isinstance(module, SparseFFN)
+            ]
             if not moe_layers:
-                raise ValueError(
-                    "No MoE layers were found."
-                )
+                raise ValueError("No MoE layers were found.")
 
             # get the necessary config values
             num_shared_experts = self.config.num_shared_experts
-            num_experts = self.config.num_experts - num_shared_experts # excluding shared experts
+            num_experts = (
+                self.config.num_experts - num_shared_experts
+            )  # excluding shared experts
             capacity_type = self.config.expert_capacity_type
             expert_capacity = self.config.expert_capacity
-            
+
             # checks
-            if capacity_type == 'absolute' and num_tokens == 0:
+            if capacity_type == "absolute" and num_tokens == 0:
                 raise ValueError(
                     "To calculate the number of active parameters, you must specify the number of tokens per batch "
                     "when the capacity type is 'absolute'"
                 )
 
             # calculate proportion of tokens that each expert receives
-            if expert_capacity == -1: 
+            if expert_capacity == -1:
                 k = self.config.num_experts_per_tok
                 prop_tokens_per_expert = k / num_experts
-            elif capacity_type == 'absolute':
+            elif capacity_type == "absolute":
                 prop_tokens_per_expert = expert_capacity / num_tokens
             else:
                 prop_tokens_per_expert = expert_capacity / num_experts
@@ -170,9 +167,10 @@ class ParameterCountMixin:
                 p.numel()
                 for name, p in self.named_parameters()
                 if (not any(p is e for moe in moe_layers for e in moe.parameters()))
-                and (name not in exclude_param_names) and (not only_trainable or p.requires_grad)
+                and (name not in exclude_param_names)
+                and (not only_trainable or p.requires_grad)
             )
-        
+
             # count sparse parameters
             for moe in moe_layers:
                 # router (fully active)
@@ -182,36 +180,35 @@ class ParameterCountMixin:
                 # shared experts, if any (fully active)
                 if num_shared_experts > 0:
                     shared_expert_params = sum(
-                        p.numel() 
-                        for p in moe.experts[:num_shared_experts].parameters()
+                        p.numel() for p in moe.experts[:num_shared_experts].parameters()
                     )
                     total_num_params += shared_expert_params
 
                 # experts (partially active)
                 total_expert_params = sum(
-                    p.numel() 
-                    for p in moe.experts[num_shared_experts:].parameters()
+                    p.numel() for p in moe.experts[num_shared_experts:].parameters()
                 )
                 active_expert_params = total_expert_params * prop_tokens_per_expert
-                total_num_params += active_expert_params             
+                total_num_params += active_expert_params
         # count all parameters
-        else: 
+        else:
             total_num_params = sum(
                 p.numel()
                 for name, p in self.named_parameters()
-                if name not in exclude_param_names and (not only_trainable or p.requires_grad)
+                if name not in exclude_param_names
+                and (not only_trainable or p.requires_grad)
             )
 
         if human_readable:
             return self._human_readable(total_num_params)
         return total_num_params
-    
+
     def _human_readable(self, total_num_params):
-        units = ['T', 'B', 'M', 'K']
+        units = ["T", "B", "M", "K"]
         thresholds = [1e12, 1e9, 1e6, 1e3]
-        
+
         for unit, threshold in zip(units, thresholds):
             if total_num_params >= threshold:
                 return f"{total_num_params / threshold:.2f}{unit}"
-        
+
         return str(total_num_params)

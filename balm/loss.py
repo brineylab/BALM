@@ -19,17 +19,20 @@ def router_z_loss(router_logits: torch.Tensor) -> torch.Tensor:
 
     Parameters
     ----------
-    router_logits : float
-        Input logits of shape [batch_size * sequence_length, num_experts]
+    router_logits : torch.Tensor
+        Input logits of shape [batch_size * sequence_length, num_experts].
 
     Returns
     -------
     torch.Tensor
-        The z-loss for the router
+        The z-loss for the router.
 
+    References
+    ----------
     .. _Designing Effective Sparse Expert Models:
         https://arxiv.org/abs/2202.08906
     """
+
     num_tokens, _ = router_logits.shape
     log_z = torch.logsumexp(router_logits, dim=-1)
     z_loss = log_z**2
@@ -54,37 +57,36 @@ def router_load_balancing_loss(
     implementation that supports both K=1 (top-1 routing) and K>1 (top-k routing):
       - for K=1 (top-1 routing), this reduces to the Switch Transformer load balancing loss.
       - for K>1 (top-k routing), this correctly accounts for multiple experts chosen per token.
-    
+
     Implementation is slighlty modified from the `Mixtral implementation`_.
 
     Parameters
     ----------
     router_probs : torch.Tensor
-        Concatenated router probs for all sparse layers.
-        Shape: [num_tokens, num_experts], where:
-            # num_tokens = (batch_size * seq_len * num_sparse_layers)
-    
+        Concatenated router probs for all sparse layers. Shape is [num_tokens, num_experts],
+        where num_tokens is (batch_size * seq_len * num_sparse_layers)
     k: int
         Number of experts each token is routed to (for topK routing).
-    
-    attention_mask: torch.Tensor, optional (default=None)
-        Attention mask
-        Shape: [batch_size, seq_len]
+    attention_mask: torch.Tensor, optional
+        Attention mask of shape: [batch_size, seq_len].
 
     Returns
     -------
     torch.Tensor
         The auxiliary load balancing loss for the router.
 
+    References
+    ----------
     .. _Switch Transformer paper:
         https://arxiv.org/abs/2101.03961
 
     .. _Mixtral implementation:
         https://github.com/huggingface/transformers/blob/main/src/transformers/models/mixtral/modeling_mixtral.py#L851
     """
+
     num_tokens, num_experts = router_probs.shape
     device = router_probs.device
-    
+
     # apply top-k across probs for all layers ==> (num_tokens, k)
     _, selected_experts = torch.topk(router_probs, k, dim=-1)
 
@@ -111,9 +113,9 @@ def router_load_balancing_loss(
         )
 
         # Compute the percentage of tokens routed to each experts
-        tokens_per_expert = torch.sum(expert_mask.float() * expert_attention_mask, dim=0) / torch.sum(
-            expert_attention_mask, dim=0
-        )
+        tokens_per_expert = torch.sum(
+            expert_mask.float() * expert_attention_mask, dim=0
+        ) / torch.sum(expert_attention_mask, dim=0)
 
         # Compute the mask that masks all padding tokens as 0 with the same shape of tokens_per_expert
         router_per_expert_attention_mask = (
@@ -124,9 +126,11 @@ def router_load_balancing_loss(
         )
 
         # Compute the average probability of routing to these experts
-        router_prob_per_expert = torch.sum(router_probs * router_per_expert_attention_mask, dim=0) / torch.sum(
-            router_per_expert_attention_mask, dim=0
-        )
+        router_prob_per_expert = torch.sum(
+            router_probs * router_per_expert_attention_mask, dim=0
+        ) / torch.sum(router_per_expert_attention_mask, dim=0)
 
-    overall_loss = torch.sum(tokens_per_expert * router_prob_per_expert.unsqueeze(0)) * num_experts
+    overall_loss = (
+        torch.sum(tokens_per_expert * router_prob_per_expert.unsqueeze(0)) * num_experts
+    )
     return overall_loss
