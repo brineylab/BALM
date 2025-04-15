@@ -2,7 +2,6 @@
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
-
 from typing import Optional, Tuple
 
 import torch
@@ -11,6 +10,7 @@ import torch.nn.functional as F
 from transformers import PretrainedConfig
 
 __all__ = ["TopKRouter", "ExpertChoiceRouter"]
+
 
 class BaseRouter(nn.Module):
     """
@@ -26,11 +26,11 @@ class BaseRouter(nn.Module):
         Whether to use bias
     router_dtype: torch.dtype
         Data type to use for softmax of the router.
-
     """
+
     def __init__(
-        self, 
-        d_model: int, 
+        self,
+        d_model: int,
         num_experts: int,
         router_bias: bool,
         router_dtype: str,
@@ -45,11 +45,14 @@ class BaseRouter(nn.Module):
             "float16": torch.float16,
             "bfloat16": torch.bfloat16,
         }
-        
+
         if dtype_str not in dtype_mapping:
-            raise ValueError(f"Invalid dtype string: {dtype_str}. Choose from {list(dtype_mapping.keys())}")
-        
+            raise ValueError(
+                f"Invalid dtype string: {dtype_str}. Choose from {list(dtype_mapping.keys())}"
+            )
+
         return dtype_mapping[dtype_str]
+
 
 class TopKRouter(BaseRouter):
     """
@@ -76,22 +79,15 @@ class TopKRouter(BaseRouter):
 
     .. _DeepSeqMoE:
         https://arxiv.org/abs/2401.06066
-    
+
     """
-    def forward(
-        self, 
-        x: torch.Tensor, 
-        padding_mask: torch.Tensor,
-        k: int, 
-        expert_capacity: int
-    ):
+
+    def forward(self, x: torch.Tensor, k: int, expert_capacity: int):
         """
         Parameters:
         -----------
         x : torch.Tensor
             Shape: `(num_tokens, d_model)`. Input token representations.
-        padding_mask : Optional[torch.Tensor]
-            Shape: `(batch_size, seq_len)`. Boolean mask for padded tokens (not yet applied).
         k : int
             Maximum number of experts each token can choose.
         expert_capacity : int
@@ -107,8 +103,8 @@ class TopKRouter(BaseRouter):
             Selected token probabilities for each expert `(num_experts, expert_capacity)`.
         expert_indices : torch.Tensor
             Token indices assigned to each expert `(num_experts, expert_capacity)`.
-
         """
+
         num_tokens = x.size(0)
         num_experts = self.linear.out_features
         k = min(k, num_experts)
@@ -125,7 +121,7 @@ class TopKRouter(BaseRouter):
         probs = F.softmax(logits, dim=-1, dtype=self.router_dtype)
 
         # select top-k experts for each token ==> (num_tokens, k)
-        topk_probs, topk_expert_ids = torch.topk(probs, k, dim=-1)
+        topk_probs, topk_expert_ids = torch.topk(probs, k, dim=-1, sorted=False)
 
         # convert back to original dtype
         topk_probs = topk_probs.to(x.dtype)
@@ -133,42 +129,28 @@ class TopKRouter(BaseRouter):
         # normalize probs to sum to 1
         # but save unnormalized probs for sorting
         unnorm_topk_probs = topk_probs.clone().detach()
-        topk_probs /= topk_probs.sum(dim=-1, keepdim=True) 
-
-        # TODO
-        # mask padding tokens
-        # if padding_mask is not None:
-        #     topk_expert_ids = topk_expert_ids[~padding_mask]
-        #     topk_probs = topk_probs[~padding_mask]
-
-        #     # generate token ids for below
-        #     token_ids = torch.arange(num_tokens, device=x.device)[~padding_mask]
-        #     num_tokens = len(token_ids)
-        # else:
-        #     # generate token ids for below
-        #     token_ids = torch.arange(num_tokens, device=x.device)
-
+        topk_probs /= topk_probs.sum(dim=-1, keepdim=True)
 
         # flatten top-k expert IDs and probs ==> (num_tokens * k)
         flat_expert_ids, flat_unnorm_probs, flat_probs = (
-            topk_expert_ids.reshape(-1), unnorm_topk_probs.reshape(-1), topk_probs.reshape(-1)
+            topk_expert_ids.flatten(),
+            unnorm_topk_probs.flatten(),
+            topk_probs.flatten(),
         )
 
         # we also need the original token ids that correspond to each slot
         # in flattened form: e.g. 0..(num_tokens-1) repeated k times ==> (num_tokens * k)
-        flat_token_ids = (
-            torch.arange(num_tokens, device=x.device)
-            .unsqueeze(1)
-            .expand(num_tokens, k)
-            .reshape(-1)
-        )
+        flat_token_ids = torch.arange(num_tokens * k, device=x.device) // k
 
         # initalize empty tensors for results
         expert_probs = torch.zeros(
             (num_experts, expert_capacity), dtype=probs.dtype, device=probs.device
         )
         expert_indices = torch.full(
-            (num_experts, expert_capacity), fill_value=-1, dtype=torch.long, device=probs.device,
+            (num_experts, expert_capacity),
+            fill_value=-1,
+            dtype=torch.long,
+            device=probs.device,
         )
 
         # for each expert, pick up to 'expert_capacity' tokens in order of highest expert affiniy
@@ -184,13 +166,15 @@ class TopKRouter(BaseRouter):
 
             # sort by expert affinity
             if num_chosen_tokens > 0:
-                
+
                 # keep highest unnormalized probs, up to `expert_capacity` tokens per expert
                 keep = min(expert_capacity, num_chosen_tokens)
-                _, sorted_idx = torch.topk(chosen_unnorm_probs, keep)
+                _, sorted_idx = torch.topk(chosen_unnorm_probs, keep, sorted=False)
 
                 # filter for selected idxs
-                expert_probs[e, :keep] = chosen_probs[sorted_idx] # use normalized probs for weighting expert outputs
+                expert_probs[e, :keep] = chosen_probs[
+                    sorted_idx
+                ]  # use normalized probs for weighting expert outputs
                 expert_indices[e, :keep] = chosen_token_ids[sorted_idx]
 
         return logits, probs, expert_probs, expert_indices
@@ -208,7 +192,7 @@ class ExpertChoiceRouter(BaseRouter):
         one of the primary benefits of expert choice routing is thought to be their
         ability to heterogeneously devote computation to a subset of highly complex/difficult
         tokens.
-        
+
         If tokens are not selected by an expert, their hidden states are passed to the
         subsequent layer unchanged.
 
@@ -216,22 +200,15 @@ class ExpertChoiceRouter(BaseRouter):
         https://arxiv.org/abs/2202.09368
 
     """
+
     def forward(
-        self, 
-        x: torch.Tensor, 
-        padding_mask: torch.Tensor,
-        k: int, 
-        expert_capacity: int
+        self, x: torch.Tensor, expert_capacity: int, **kwargs
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Parameters:
         -----------
         x : torch.Tensor
             Shape: `(num_tokens, d_model)`. Input token representations.
-        padding_mask : Optional[torch.Tensor]
-            Shape: `(batch_size, seq_len)`. Boolean mask for padded tokens (not yet applied).
-        k : int
-            Unused by expert choice router. Present for compatibility with TopKRouter
         expert_capacity : int
             Maximum number of tokens each expert can process.
 
@@ -245,13 +222,13 @@ class ExpertChoiceRouter(BaseRouter):
             Selected token probabilities for each expert `(num_experts, expert_capacity)`.
         expert_indices : torch.Tensor
             Token indices assigned to each expert `(num_experts, expert_capacity)`.
+        """
 
-        """ 
         # compute routing logits ==> (num_tokens, num_experts)
         logits = self.linear(x)
 
         # softmax in higher precision (fp32 for stability)
-        probs = F.softmax(logits, dim=0, dtype=self.router_dtype) 
+        probs = F.softmax(logits, dim=0, dtype=self.router_dtype)
 
         # select tokens for each expert
         expert_probs, expert_indices = torch.topk(probs, k=expert_capacity, dim=0)

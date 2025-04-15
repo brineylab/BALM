@@ -9,20 +9,13 @@ import torch.nn as nn
 
 from ..config import BalmConfig
 from ..modules import (
-    BalmLMHead, 
-    BalmSequenceClassificationHead, 
-    DenseTransformerLayer
+    BalmLMHead,
+    BalmSequenceClassificationHead,
+    BalmAttentionSequenceClassificationHead,
+    DenseTransformerLayer,
 )
-from ..outputs import (
-    BaseModelOutput, 
-    MaskedLMOutput, 
-    SequenceClassifierOutput
-)
-from .base import (
-    BalmPreTrainedModel, 
-    FreezeBaseModelMixin, 
-    ParameterCountMixin
-)
+from ..outputs import BaseModelOutput, MaskedLMOutput, SequenceClassifierOutput
+from .base import BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin
 
 __all__ = [
     "BalmModel",
@@ -39,6 +32,9 @@ class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
         Configuration object defining model architecture and hyperparameters.
     """
 
+    config_class = BalmConfig
+    base_model_prefix = "balm"
+
     def __init__(self, config: BalmConfig):
         super().__init__(config)
         self.config = config
@@ -52,7 +48,9 @@ class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
         )
 
         # layers
-        self.layers = nn.ModuleList([DenseTransformerLayer(config) for _ in range(config.num_hidden_layers)])
+        self.layers = nn.ModuleList(
+            [DenseTransformerLayer(config) for _ in range(config.num_hidden_layers)]
+        )
 
         # final layer norm
         self.final_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
@@ -73,52 +71,45 @@ class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
         """
         Parameters:
         -----------
-
         input_ids: torch.LongTensor
             Tokenized input IDs, of shape (batch_size, sequence_length). Cannot be provided if
             `inputs_embeds` is also provided.
-
         attention_mask: torch.LongTensor
-            Attention mask, of shape (batch_size, sequence_length). Values of `1` indicate valid tokens 
+            Attention mask, of shape (batch_size, sequence_length). Values of `1` indicate valid tokens
             while values of `0` indicate padding that should be ignored for attention purposes.
-
         position_ids: torch.LongTensor
             Position IDs, of shape (batch_size, sequence_length).
-
         inputs_embeds: torch.FloatTensor
             Input embeddings, of shape (batch_size, sequence_length, hidden_size). Cannot be provided
             if `input_ids` is also provided.
-
         output_attentions: bool
             Whether to output the attentions.
-
         output_hidden_states: bool
             Whether to output the hidden states.
-
         return_dict: bool
             Whether to return a dictionary of outputs (returns a tuple if False)
 
         Returns:
         --------
         output (tuple or dict):
-            If `return_dict` is ``True``, the output is a ``BaseModelOutput`` object:
-                - last_hidden_state (torch.FloatTensor): last hidden state
-                - hidden_states (torch.FloatTensor): hidden states
-                - attentions (torch.FloatTensor): attention weights
-
-            If `return_dict` is ``False``, the output is a ``tuple`` with the following elements:
-                - last_hidden_state (torch.FloatTensor): last hidden state
-                - hidden_states (torch.FloatTensor): hidden states
-                - attentions (torch.FloatTensor): attention weights
-
-            For attentions and hidden_states, if they are not output, the corresponding
-            value will be ``None`` (for ``BaseModelOutput``) or not returned at all (for ``tuple``).
-
+            If `return_dict` is ``True``, the output is a ``BaseModelOutput`` object.
+            Otherwise, the output is a tuple.
         """
+
         # parse output options
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        return_dict = return_dict if return_dict is not None else self.config.return_dict
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
+        output_hidden_states = (
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
+        )
+        return_dict = (
+            return_dict if return_dict is not None else self.config.return_dict
+        )
 
         # init
         all_self_attentions = () if output_attentions else None
@@ -192,7 +183,6 @@ class BalmForMaskedLM(BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountM
     ----------
     config: BalmConfig
         Configuration object defining model architecture and hyperparameters.
-
     """
 
     config_class = BalmConfig
@@ -233,39 +223,43 @@ class BalmForMaskedLM(BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountM
         ----------
         input_ids: torch.LongTensor
             Tokenized input IDs
-
         attention_mask: torch.LongTensor
             Attention mask
-
         position_ids: torch.LongTensor
             Position IDs, of shape (batch_size, sequence_length).
-
         inputs_embeds: torch.FloatTensor
             Input embeddings, of shape (batch_size, sequence_length, hidden_size). Cannot be provided
             if `input_ids` is also provided.
-        
         labels: torch.LongTensor
             Labels
-
         output_attentions: bool
             Whether to output the attentions.
-
         output_hidden_states: bool
             Whether to output the hidden states.
-
         return_dict: bool
             Whether to return a dictionary of outputs (returns a tuple if False)
 
         Returns
         -------
         output (tuple or dict):
-            If `return_dict` is ``True``, the output is a ``MaskedLMOutput`` object
-
+            If `return_dict` is ``True``, the output is a ``MaskedLMOutput`` object.
+            Otherwise, the output is a tuple.
         """
+
         # parse output options
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        return_dict = return_dict if return_dict is not None else self.config.return_dict
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
+        output_hidden_states = (
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
+        )
+        return_dict = (
+            return_dict if return_dict is not None else self.config.return_dict
+        )
 
         # init
         if input_ids is not None and inputs_embeds is not None:
@@ -320,12 +314,12 @@ class BalmForSequenceClassification(
     """
     BALM model for sequence classification.
     Uses the BALM encoder and adds a sequence-level classification head.
+    Can be configured with or without an attention block.
 
     Parameters
     ----------
     config : BalmConfig
         Configuration object defining model architecture and hyperparameters.
-
     """
 
     config_class = BalmConfig
@@ -340,8 +334,15 @@ class BalmForSequenceClassification(
 
         # model
         self.balm = BalmModel(config)
-        self.classifier = BalmSequenceClassificationHead(config)
-        
+        if config.attention_classifier:
+            self.classifier = BalmAttentionSequenceClassificationHead(config)
+        else:
+            if self.config.output_classifier_attentions == True:
+                raise ValueError(
+                    "Invalid classifier configuration. Cannot output classifier attentions when attention_classifier is False."
+                )
+            self.classifier = BalmSequenceClassificationHead(config)
+
         # loss function
         self.criterion = nn.CrossEntropyLoss()
 
@@ -349,7 +350,7 @@ class BalmForSequenceClassification(
         self.init_weights()
 
         # freeze base model weights
-        if config.classification_freeze_base:
+        if config.classifier_freeze_base:
             self.freeze_base_model()
 
     def forward(
@@ -359,6 +360,7 @@ class BalmForSequenceClassification(
         position_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.Tensor] = None,
+        output_classifier_attentions: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -370,33 +372,50 @@ class BalmForSequenceClassification(
         ----------
         input_ids: torch.LongTensor
             Tokenized input IDs
-
         attention_mask: torch.LongTensor
             Attention mask
-
         position_ids: torch.LongTensor
             Position IDs, of shape (batch_size, sequence_length).
-
         inputs_embeds: torch.FloatTensor
             Input embeddings, of shape (batch_size, sequence_length, hidden_size). Cannot be provided
             if `input_ids` is also provided.
-
         labels: torch.LongTensor
             Labels
-
+        output_classifier_attentions: bool
+            Whether to output classifier attention weights.
         output_attentions: bool
             Whether to output attention weights
-
         output_hidden_states: bool
             Whether to output hidden states
-
         return_dict: bool
             Whether to return a dictionary of outputs (returns a tuple if False)
+
+        Returns
+        -------
+        output (tuple or dict):
+            If `return_dict` is ``True``, the output is a ``MoESequenceClassifierOutput`` object.
+            Otherwise, the output is a tuple.
         """
+
         # parse output options
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        return_dict = return_dict if return_dict is not None else self.config.return_dict
+        output_classifier_attentions = (
+            output_classifier_attentions
+            if output_classifier_attentions is not None
+            else self.config.output_classifier_attentions
+        )
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
+        output_hidden_states = (
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
+        )
+        return_dict = (
+            return_dict if return_dict is not None else self.config.return_dict
+        )
 
         # init
         if input_ids is not None and inputs_embeds is not None:
@@ -414,8 +433,20 @@ class BalmForSequenceClassification(
         )
         x = outputs.last_hidden_state
 
+        # invert attention mask to padding mask and convert to boolean
+        if attention_mask is not None:
+            padding_mask = 1 - attention_mask
+            padding_mask = padding_mask.bool()
+
         # classifier
-        classifier_logits = self.classifier(x)
+        classifier_out = self.classifier(
+            x, padding_mask=padding_mask, need_weights=output_classifier_attentions
+        )
+        if output_classifier_attentions:
+            classifier_logits, classifier_attn = classifier_out
+        else:
+            classifier_logits = classifier_out
+            classifier_attn = None
 
         # classification loss
         classifier_loss = None
@@ -435,6 +466,7 @@ class BalmForSequenceClassification(
                     classifier_logits,
                     outputs.hidden_states,
                     outputs.attentions,
+                    classifier_attn,
                 ]
                 if v is not None
             )
@@ -443,4 +475,5 @@ class BalmForSequenceClassification(
             logits=classifier_logits,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
+            classifier_attentions=classifier_attn,
         )

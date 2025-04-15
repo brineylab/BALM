@@ -12,19 +12,12 @@ from ..loss import router_load_balancing_loss, router_z_loss
 from ..modules import (
     BalmLMHead,
     BalmSequenceClassificationHead,
+    BalmAttentionSequenceClassificationHead,
     DenseTransformerLayer,
-    SparseTransformerLayer
+    SparseTransformerLayer,
 )
-from ..outputs import (
-    MoEModelOutput,
-    MoEMaskedLMOutput,
-    MoESequenceClassifierOutput
-)
-from .base import (
-    BalmPreTrainedModel, 
-    FreezeBaseModelMixin, 
-    ParameterCountMixin
-)
+from ..outputs import MoEModelOutput, MoEMaskedLMOutput, MoESequenceClassifierOutput
+from .base import BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountMixin
 
 __all__ = [
     "BalmMoEModel",
@@ -41,7 +34,13 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         Configuration object defining model architecture and hyperparameters.
     """
 
-    def __init__(self, config: BalmMoEConfig):
+    config_class = BalmMoEConfig
+    base_model_prefix = "balm_moe"
+
+    def __init__(
+        self,
+        config: BalmMoEConfig,
+    ):
         super().__init__(config)
         self.config = config
 
@@ -56,14 +55,14 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         # layers
         self.layers = nn.ModuleList()
         for layer_idx in range(self.config.num_hidden_layers):
-            if self.config.alternate_sparsity:
-                # alternate dense/sparse layers, dense first
+            if (
+                self.config.alternate_sparsity
+            ):  # alternate dense/sparse layers, dense first
                 if layer_idx % 2 == 0:
                     layer = DenseTransformerLayer(config)
                 else:
                     layer = SparseTransformerLayer(config)
-            else:
-                # all sparse layers
+            else:  # all sparse layers
                 layer = SparseTransformerLayer(config)
             self.layers.append(layer)
 
@@ -88,67 +87,58 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         """
         Parameters:
         -----------
-
         input_ids: torch.LongTensor
             Tokenized input IDs
-
         attention_mask: torch.LongTensor
-            Attention mask, of shape (batch_size, sequence_length). Values of `1` indicate valid tokens 
+            Attention mask, of shape (batch_size, sequence_length). Values of `1` indicate valid tokens
             while values of `0` indicate padding that should be ignored for attention purposes.
-
         position_ids: torch.LongTensor
             Position IDs, of shape (batch_size, sequence_length).
-
         inputs_embeds: torch.FloatTensor
             Input embeddings, of shape (batch_size, sequence_length, hidden_size). Cannot be provided
             if `input_ids` is also provided.
-
         output_attentions: bool
             Whether to output attention weights
-
         output_hidden_states: bool
             Whether to output hidden states
-
         output_router_logits: bool
             Whether to output router logits
-
         output_expert_indexes: bool
             Whether to output expert indexes
-
         return_dict: bool
             Whether to return a dictionary of outputs (returns a tuple if False)
 
         Returns:
         --------
         output (tuple or dict):
-            If `return_dict` is ``True``, the output is a ``MoEModelOutput`` object:
-                - last_hidden_state (torch.FloatTensor): last hidden state
-                - hidden_states (torch.FloatTensor): hidden states
-                - attentions (torch.FloatTensor): attention weights
-                - router_logits (torch.FloatTensor): router logits
-                - expert_indexes (torch.LongTensor): expert indexes
-                - z_loss (torch.FloatTensor): router z loss
-                - aux_loss (torch.FloatTensor): router auxiliary loss
-
-            If `return_dict` is ``False``, the output is a ``tuple`` with the following elements:
-                - last_hidden_state (torch.FloatTensor): last hidden state
-                - hidden_states (torch.FloatTensor): hidden states
-                - attentions (torch.FloatTensor): attention weights
-                - router_logits (torch.FloatTensor): router logits
-                - expert_indexes (torch.LongTensor): expert indexes
-                - z_loss (torch.FloatTensor): router z loss
-                - aux_loss (torch.FloatTensor): router auxiliary loss
-
-            For attentions, hidden_states, router_logits, and expert_indexes, if they are not output, the corresponding
-            value will be ``None`` (for ``MoEModelOutput``) or not returned at all (for ``tuple``).
-
+            If `return_dict` is ``True``, the output is a ``MoEModelOutput`` object.
+            Otherwise, the output is a tuple.
         """
+
         # parse output options
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        output_router_logits = output_router_logits if output_router_logits is not None else self.config.output_router_logits
-        output_expert_indexes = output_expert_indexes if output_expert_indexes is not None else self.config.output_expert_indexes
-        return_dict = return_dict if return_dict is not None else self.config.return_dict
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
+        output_hidden_states = (
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
+        )
+        output_router_logits = (
+            output_router_logits
+            if output_router_logits is not None
+            else self.config.output_router_logits
+        )
+        output_expert_indexes = (
+            output_expert_indexes
+            if output_expert_indexes is not None
+            else self.config.output_expert_indexes
+        )
+        return_dict = (
+            return_dict if return_dict is not None else self.config.return_dict
+        )
 
         # init
         all_self_attentions = () if output_attentions else None
@@ -171,7 +161,7 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
             position_ids = position_ids.unsqueeze(0).expand(input_shape)
         if inputs_embeds is None:
             inputs_embeds = self.word_embeddings(input_ids)
-        
+
         # embeddings
         x = inputs_embeds
         if self.position_embeddings is not None and position_ids is not None:
@@ -224,9 +214,7 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
             aux_loss = None
         else:
             aux_loss = router_load_balancing_loss(
-                cat_router_probs,
-                k=self.config.num_experts_per_tok,
-                attention_mask=None
+                cat_router_probs, k=self.config.num_experts_per_tok, attention_mask=None
             )
 
         # outputs
@@ -266,11 +254,10 @@ class BalmMoEForMaskedLM(
     ----------
     config: BalmMoEConfig
         Configuration object defining model architecture and hyperparameters.
-
     """
 
     config_class = BalmMoEConfig
-    base_model_prefix = "balm"
+    base_model_prefix = "balm_moe"
 
     def __init__(
         self,
@@ -280,7 +267,7 @@ class BalmMoEForMaskedLM(
         self.config = config
 
         # model
-        self.balm = BalmMoEModel(config)
+        self.balm_moe = BalmMoEModel(config)
         self.lm_head = BalmLMHead(config)
 
         # loss function
@@ -315,50 +302,60 @@ class BalmMoEForMaskedLM(
         ----------
         input_ids: torch.LongTensor
             Tokenized input IDs
-
         attention_mask: torch.LongTensor
             Attention mask
-
         position_ids: torch.LongTensor
             Position IDs, of shape (batch_size, sequence_length).
-
         inputs_embeds: torch.FloatTensor
             Input embeddings, of shape (batch_size, sequence_length, hidden_size). Cannot be provided
             if `input_ids` is also provided.
-
         labels: torch.LongTensor
             Labels
-
         output_attentions: bool
             Whether to output attention weights
-
         output_hidden_states: bool
             Whether to output hidden states
-
         output_router_logits: bool
             Whether to output router logits
-
         output_expert_indexes: bool
             Whether to output expert indexes
-
         return_dict: bool
             Whether to return a dictionary of outputs (returns a tuple if False)
 
         Returns
         -------
         output (tuple or dict):
-            If `return_dict` is ``True``, the output is a ``MoEMaskedLMOutput`` object
-
+            If `return_dict` is ``True``, the output is a ``MoEMaskedLMOutput`` object.
+            Otherwise, the output is a tuple.
         """
+
         # parse output options
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        output_router_logits = output_router_logits if output_router_logits is not None else self.config.output_router_logits
-        output_expert_indexes = output_expert_indexes if output_expert_indexes is not None else self.config.output_expert_indexes
-        return_dict = return_dict if return_dict is not None else self.config.return_dict
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
+        output_hidden_states = (
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
+        )
+        output_router_logits = (
+            output_router_logits
+            if output_router_logits is not None
+            else self.config.output_router_logits
+        )
+        output_expert_indexes = (
+            output_expert_indexes
+            if output_expert_indexes is not None
+            else self.config.output_expert_indexes
+        )
+        return_dict = (
+            return_dict if return_dict is not None else self.config.return_dict
+        )
 
         # encoder
-        outputs = self.balm(
+        outputs = self.balm_moe(
             input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -385,7 +382,7 @@ class BalmMoEForMaskedLM(
 
             # router loss(es)
             z_loss = self.router_z_loss_coef * (outputs.z_loss)
-            if self.config.router_type == "expert choice": # no aux loss
+            if self.config.router_type == "expert choice":  # no aux loss
                 loss = lm_loss + z_loss
             else:
                 aux_loss = self.router_aux_loss_coef * (outputs.aux_loss)
@@ -402,8 +399,8 @@ class BalmMoEForMaskedLM(
                     outputs.attentions,
                     outputs.router_logits,
                     outputs.expert_indexes,
-                    aux_loss,
                     z_loss,
+                    aux_loss,
                     lm_loss,
                 ]
                 if v is not None
@@ -427,16 +424,16 @@ class BalmMoEForSequenceClassification(
     """
     BALM Mixture-of-Experts (MoE) model for sequence classification.
     Uses the BALM-MoE encoder and adds a sequence-level classification head.
+    Can be configured with or without an attention block.
 
     Parameters
     ----------
     config : BalmMoEConfig
         Configuration object defining model architecture and hyperparameters.
-
     """
 
     config_class = BalmMoEConfig
-    base_model_prefix = "balm"
+    base_model_prefix = "balm_moe"
 
     def __init__(
         self,
@@ -446,8 +443,15 @@ class BalmMoEForSequenceClassification(
         self.config = config
 
         # model
-        self.balm = BalmMoEModel(config)
-        self.classifier = BalmSequenceClassificationHead(config)
+        self.balm_moe = BalmMoEModel(config)
+        if config.attention_classifier:
+            self.classifier = BalmAttentionSequenceClassificationHead(config)
+        else:
+            if self.config.output_classifier_attentions == True:
+                raise ValueError(
+                    "Invalid classifier configuration. Cannot output classifier attentions when attention_classifier is False."
+                )
+            self.classifier = BalmSequenceClassificationHead(config)
 
         # loss function
         self.criterion = nn.CrossEntropyLoss()
@@ -463,7 +467,7 @@ class BalmMoEForSequenceClassification(
 
         # freeze base model weights
         # and zero out router loss coeffs
-        if config.classification_freeze_base:
+        if config.classifier_freeze_base:
             self.freeze_base_model()
 
     def forward(
@@ -473,6 +477,7 @@ class BalmMoEForSequenceClassification(
         position_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.Tensor] = None,
+        output_classifier_attentions: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         output_router_logits: Optional[bool] = None,
@@ -486,44 +491,67 @@ class BalmMoEForSequenceClassification(
         ----------
         input_ids: torch.LongTensor
             Tokenized input IDs
-
         attention_mask: torch.LongTensor
             Attention mask
-
         position_ids: torch.LongTensor
             Position IDs, of shape (batch_size, sequence_length).
-
         inputs_embeds: torch.FloatTensor
             Input embeddings, of shape (batch_size, sequence_length, hidden_size). Cannot be provided
             if `input_ids` is also provided.
-
         labels: torch.LongTensor
             Labels
-
+        output_classifier_attentions: bool
+            Whether to output classifier attention weights.
         output_attentions: bool
             Whether to output attention weights
-
         output_hidden_states: bool
             Whether to output hidden states
-
         output_router_logits: bool
             Whether to output router logits
-
         output_expert_indexes: bool
             Whether to output expert indexes
-
         return_dict: bool
             Whether to return a dictionary of outputs (returns a tuple if False)
+
+        Returns:
+        --------
+        output (tuple or dict):
+            If `return_dict` is ``True``, the output is a ``MoESequenceClassifierOutput`` object.
+            Otherwise, the output is a tuple.
         """
+
         # parse output options
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        output_router_logits = output_router_logits if output_router_logits is not None else self.config.output_router_logits
-        output_expert_indexes = output_expert_indexes if output_expert_indexes is not None else self.config.output_expert_indexes
-        return_dict = return_dict if return_dict is not None else self.config.return_dict
+        output_classifier_attentions = (
+            output_classifier_attentions
+            if output_classifier_attentions is not None
+            else self.config.output_classifier_attentions
+        )
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
+        output_hidden_states = (
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
+        )
+        output_router_logits = (
+            output_router_logits
+            if output_router_logits is not None
+            else self.config.output_router_logits
+        )
+        output_expert_indexes = (
+            output_expert_indexes
+            if output_expert_indexes is not None
+            else self.config.output_expert_indexes
+        )
+        return_dict = (
+            return_dict if return_dict is not None else self.config.return_dict
+        )
 
         # encoder
-        outputs = self.balm(
+        outputs = self.balm_moe(
             input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -536,8 +564,20 @@ class BalmMoEForSequenceClassification(
         )
         x = outputs.last_hidden_state
 
+        # invert attention mask to padding mask and convert to boolean
+        if attention_mask is not None:
+            padding_mask = 1 - attention_mask
+            padding_mask = padding_mask.bool()
+
         # classifier
-        classifier_logits = self.classifier(x)
+        classifier_out = self.classifier(
+            x, padding_mask=padding_mask, need_weights=output_classifier_attentions
+        )
+        if output_classifier_attentions:
+            classifier_logits, classifier_attn = classifier_out
+        else:
+            classifier_logits = classifier_out
+            classifier_attn = None
 
         # loss
         loss, z_loss, aux_loss, classifier_loss = None, None, None, None
@@ -569,8 +609,9 @@ class BalmMoEForSequenceClassification(
                     outputs.attentions,
                     outputs.router_logits,
                     outputs.expert_indexes,
-                    aux_loss,
+                    classifier_attn,
                     z_loss,
+                    aux_loss,
                     classifier_loss,
                 ]
                 if v is not None
@@ -582,6 +623,7 @@ class BalmMoEForSequenceClassification(
             attentions=outputs.attentions,
             router_logits=outputs.router_logits,
             expert_indexes=outputs.expert_indexes,
+            classifier_attentions=classifier_attn,
             z_loss=z_loss,
             aux_loss=aux_loss,
             classifier_loss=classifier_loss,

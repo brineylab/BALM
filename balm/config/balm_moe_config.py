@@ -16,164 +16,136 @@ class BalmMoEConfig(PretrainedConfig):
     ----------
     vocab_size : int, default=32
         The vocabulary size of the model.
-
     hidden_size : int, default=320
         The hidden size of the model.
-
     num_hidden_layers : int, default=6
         The number of hidden layers in the model.
-
     num_attention_heads : int, default=20
         The number of attention heads in the model.
-
-    intermediate_size : int, default=1280
+    intermediate_size : int, default=None
         The intermediate size of the model.
-
+        If not provided, defaults to (`hidden_size` * 4).
     activation : str, default="swiglu"
         The activation function to use for the model.
-
     dropout : float, default=0.1
         The dropout probability for the model. Can be overridden
         by `attention_dropout`, `hidden_dropout`, and `expert_dropout`.
-
-    attention_dropout : float
+    attention_dropout : float, default=None
         The dropout probability for the attention layers.
-
-    hidden_dropout : float
+        If not provided, defaults to `dropout`.
+    hidden_dropout : float, default=None
         The dropout probability for the hidden layers.
-    
+        If not provided, defaults to `dropout`.
     ffn_bias : bool, default=True
         Whether to use a bias for FFN layers. Used in DenseTransformerLayers only.
-
     max_position_embeddings : int, default=256
         The maximum position embeddings.
-
     initializer_range : float, default=0.02
         The initializer range for the model.
-
     layer_norm_eps : float, default=1e-5
         The epsilon for layer normalization.
-
     position_embedding_type : str, default="rotary"
         The type of position embeddings to use.
         Options are "rotary" or "absolute".
-
     mask_token_id : int, default=31
         The mask token id.
-
     pad_token_id : int, default=1
         The pad token id.
-
     num_experts : int, default=8
-        The number of experts in the model.
-    
+        The total number of experts in the model.
+        If there are any shared experts, these experts are included in this total.
     num_shared_experts: int, default=0
         The number of shared experts (which receive all tokens) in the model.
-        (TODO: This is NOT implemented yet)
-
     num_experts_per_tok : int, default=1
-        The number of experts to route each token to. Only used if `router_type` is ``"topk"``.
-    
+        The number of experts to route each token to. Only used if `router_type` is "topk".
     alternate_sparsity : bool, default=True
         Whether to use alternate sparse and dense layers.
-
     router_type : str, default="topk"
         The type of router to use.
         Options are "topk" or "expert choice".
-    
     router_dtype : str, default="float32"
         Data type of the router tensors, that is converted to torch.dtype.
         Options are "float32", "float16", or "bfloat16".
-    
     router_jitter: float, default=0.0
         Jitter to apply to inputs of the router.
-
     router_bias: bool, default=False
         Whether to use a bias in the router.
-
     router_aux_loss_coef : float, default=0.01
         The coefficient for the auxiliary loss.
-
     router_z_loss_coef : float, default=0.001
         The coefficient for the z-loss.
-
     expert_capacity_type : str, default="multiplier"
         The type of expert capacity to use.
         If "absolute": tokens per expert; if "multiplier": capacity = multiplier * max_position_embeddings
-
     expert_capacity : int, default=1
-        The capacity of each expert.
+        The capacity of each expert, excluding shared experts.
         If `expert_capacity_type` is "absolute", this value is translated as the actual token capacity of each expert.
         If `expert_capacity_type` is "multiplier", this value is translated as the multiplier with which the total
         expert capacity is calculated (i.e. each expert capacity = multiplier * max_position_embeddings / num_experts).
-
         If capacity is less than 0, no expert capacity is set. This is only compatible with TopK routing.
-
     expert_activation : str, default="gelu"
         The activation function to use for the experts.
         Options are "swiglu", "relu", "gelu".
-
     expert_dropout : float
         The dropout probability for the expert layers.
-    
     expert_bias : bool, default=True
         Whether to use a bias in expert FFN layers. Used in SparseTransformerLayers only.
-
     mlm_activation: str, default="gelu"
         The activation function to use for the LM head.
-
-    classifier_activation: str, default="tanh"
-        The activation function to use for the classifier.
-
-    classification_freeze_base: bool, default=True
-        Whether to freeze the base weights of classification model. 
-
+    attention_classifier: bool, default=False
+        Whether to add attention to classification head.
+    classifier_attention_heads: int, default=None
+        Number of attention heads in the classifier.
+        If not provided, defaults to `num_attention_heads`.
+        Only used if `attention_classifier` is True.
+    classifier_activation: str, default=None
+        The activation function to use for the classifier. If None, defaults to
+        "relu" when `attention_classifier` is True and "tanh" otherwise.
+    classifier_freeze_base: bool, default=True
+        Whether to freeze the base weights of classification model.
     num_labels : int, default=2
         The number of labels for the classification head (sequence or token classification).
-
+    output_classifier_attentions : bool, default=False
+        Whether to output the classifier attention.
+        Only used if `attention_classifier` is True.
     output_attentions : bool, default=False
         Whether to output the attentions.
-
         .. warning::
-            If ``output_attentions`` is ``True``, torch can't use optimized SDPA.
+            If `output_attentions` is True, torch can't use optimized SDPA.
             See `here`_ for more details.
-
     output_hidden_states : bool, default=False
         Whether to output the hidden states.
-
     output_router_logits: bool, default=False
         Whether to output router logits.
-
     output_expert_indexes: bool, default=False
         Whether to output expert indexes.
-    
     return_dict: bool, default = True
         Whether to return a dictionary of outputs (returns a tuple if False).
-
     use_cache : bool, default=True
         Whether to use the cache.
-
     **kwargs : dict, optional
-        Additional keyword arguments are passed directly to the parent class (``transformers.PretrainedConfig``).
+        Additional keyword arguments are passed directly to the parent class (`transformers.PretrainedConfig`).
 
     Raises
     ------
     ValueError
         If the positional embedding type is not valid.
-
     ValueError
         If the router type is not valid.
-
     ValueError
         If the expert capacity type is not valid.
-
     ValueError
-        If the FFN, expert, or classifier activation functions are not valid.
+        If the FFN, expert, mlm, or classifier activation functions are not valid.
+    ValueError
+        If the classifier config is not valid.
 
+    References
+    ----------
     .. _here:
         https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html#torch.nn.MultiheadAttention.forward
-
     """
+
+    model_type = "balm_moe"
 
     def __init__(
         self,
@@ -199,7 +171,7 @@ class BalmMoEConfig(PretrainedConfig):
         num_experts_per_tok: int = 1,  # k for top-k routing (to comply with 🤗 naming)
         alternate_sparsity: bool = True,
         # router
-        router_type: str = "topk", 
+        router_type: str = "topk",
         router_dtype: str = "float32",
         router_jitter: float = 0.0,
         router_bias: bool = False,
@@ -215,9 +187,12 @@ class BalmMoEConfig(PretrainedConfig):
         # mlm
         mlm_activation: str = "gelu",
         # classification
-        classifier_activation: str = "tanh",
-        classification_freeze_base: bool = True,
+        attention_classifier: bool = False,
+        classifier_attention_heads: Optional[int] = None,
+        classifier_activation: Optional[str] = None,
+        classifier_freeze_base: bool = True,
         num_labels: int = 2,  # sequence/token-level classification
+        output_classifier_attentions: bool = False,
         # outputs
         output_attentions: bool = False,
         output_hidden_states: bool = False,
@@ -274,9 +249,18 @@ class BalmMoEConfig(PretrainedConfig):
         self.mlm_activation = mlm_activation.lower()
 
         # classification
-        self.classifier_activation = classifier_activation.lower()
-        self.classification_freeze_base = bool(classification_freeze_base)
+        self.attention_classifier = bool(attention_classifier)
+        self.classifier_attention_heads = int(
+            classifier_attention_heads
+            if classifier_attention_heads is not None
+            else num_attention_heads
+        )
+        self.classifier_activation = self._get_classifier_activation(
+            activation=classifier_activation, use_attention=self.attention_classifier
+        )
+        self.classifier_freeze_base = bool(classifier_freeze_base)
         self.num_labels = int(num_labels)
+        self.output_classifier_attentions = bool(output_classifier_attentions)
 
         # outputs
         self.output_attentions = bool(output_attentions)
@@ -297,35 +281,37 @@ class BalmMoEConfig(PretrainedConfig):
             raise ValueError(
                 f"Invalid expert capacity type: {self.expert_capacity_type}. Options are 'absolute' or 'multiplier'."
             )
-        if self.expert_capacity <= 0 and self.router_type == 'expert choice':
+        if self.expert_capacity <= 0 and self.router_type == "expert choice":
             raise ValueError(
-                "Expert capacity must be a positive integer for the Expert Choice router."
+                f"Invalid expert capacity: {str(self.expert_capacity)}. Expert capacity must be a positive integer for the Expert Choice router."
             )
-        if self.activation not in ["swiglu", "relu", "gelu", "glu", "reglu", "geglu"]:
+        # check base activations
+        base_activations = ["gelu", "relu", "glu", "swiglu", "geglu", "reglu"]
+        if self.activation not in base_activations:
             raise ValueError(
-                f"Invalid FFN activation: {self.activation}. Options are 'swiglu', 'relu', 'gelu', 'glu', 'reglu', or 'geglu'."
+                f"Invalid FFN activation: {self.activation}. Options are 'gelu', 'relu', 'glu', 'swiglu', 'geglu', or 'reglu'."
             )
-        if self.expert_activation not in [
-            "swiglu",
-            "relu",
-            "gelu",
-            "glu",
-            "reglu",
-            "geglu",
-        ]:
+        if self.expert_activation not in base_activations:
             raise ValueError(
-                f"Invalid expert activation: {self.expert_activation}. Options are 'swiglu', 'relu', 'gelu', 'glu', 'reglu', or 'geglu'."
+                f"Invalid expert activation: {self.expert_activation}. Options are 'gelu', 'relu', 'glu', 'swiglu', 'geglu', or 'reglu'."
             )
-        if self.classifier_activation not in [
-            "swiglu",
-            "relu",
-            "gelu",
-            "tanh",
-            "reglu",
-            "geglu",
-        ]:
+        # check head activations
+        head_activations = ["tanh", "relu", "gelu"]
+        if self.classifier_activation not in head_activations:
             raise ValueError(
-                f"Invalid classifier activation: {self.classifier_activation}. Options are 'swiglu', 'relu', 'gelu', 'tanh', 'reglu', or 'geglu'."
+                f"Invalid classifier activation: {self.classifier_activation}. Options are 'tanh', 'relu', or 'gelu'."
+            )
+        if self.mlm_activation not in head_activations:
+            raise ValueError(
+                f"Invalid mlm activation: {self.mlm_activation}. Options are 'tanh', 'relu', or 'gelu'."
+            )
+        # check classifier params
+        if (
+            self.attention_classifier == False
+            and self.output_classifier_attentions == True
+        ):
+            raise ValueError(
+                "Invalid classifier configuration. Cannot output classifier attentions when attention_classifier is False."
             )
 
     def _standardize_router_type(self, router_type: str) -> str:
@@ -337,3 +323,10 @@ class BalmMoEConfig(PretrainedConfig):
             raise ValueError(
                 f"Invalid router type: {router_type}. Options are 'topk' or 'expert choice'."
             )
+
+    def _get_classifier_activation(
+        self, activation: Optional[str], use_attention: bool
+    ) -> str:
+        if activation is None:
+            return "relu" if use_attention else "tanh"
+        return activation.lower()

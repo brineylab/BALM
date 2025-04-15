@@ -2,32 +2,35 @@
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
-from typing import Union
+from typing import Optional
 import math
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-__all__ = ["SwiGLU", "GeGLU", "ReGLU", "get_activation_fn"]
+__all__ = ["get_activation_fn"]
 
 
 def get_activation_fn(
-    activation: Union[str, nn.Module],
-    dim: int | None = None,
+    activation: str,
+    input_dim: Optional[int] = None,
+    output_dim: Optional[int] = None,
+    bias: Optional[bool] = None,
 ) -> nn.Module:
     """
-    Get an activation function from a string or a PyTorch module.
+    Get the activation function from a string.
 
     Parameters
     ----------
-    activation: Union[str, nn.Module]
-        The activation function to get. If a string, it must be one of "tanh", "gelu", "relu", "glu",
-        "swiglu", "geglu", or "reglu". If a module, it must be a subclass of `torch.nn.Module`,
-        and the module will be returned as is.
-
-    .. warning::
-        SwiGLU will return a tensor with half the dimension of the input tensor.
+    activation: str
+        The activation function to get.
+    input_dim: int, optional
+        The input dimension, used for GLU activations.
+    output_dim: int, optional
+        The output dimension, used for GLU activations.
+    bias: bool, optional
+        Whether to use bias in the linear layers, used for GLU activations.
 
     Returns
     -------
@@ -38,36 +41,25 @@ def get_activation_fn(
     ------
     ValueError
         If the activation function is not supported.
-
     """
-    if isinstance(activation, str):
-        activation = activation.lower()
-        if activation == "tanh":
-            return nn.Tanh()
-        elif activation == "gelu":
-            return GELU()
-        elif activation == "relu":
-            return nn.ReLU()
-        elif activation == "glu":
-            return nn.GLU()
-        elif activation == "swiglu":
-            return SwiGLU()
-        elif activation == "geglu":
-            return GeGLU()
-        elif activation == "reglu":
-            return ReGLU()
-        else:
-            raise ValueError(f"Unsupported activation: {activation}")
-    elif isinstance(activation, nn.Module):
-        return activation
-    raise ValueError(
-        f"Activation must be a string or a PyTorch module, got {type(activation)}"
-    )
+
+    if activation == "tanh":
+        return nn.Tanh()
+    elif activation == "gelu":
+        return GELU()
+    elif activation == "relu":
+        return nn.ReLU()
+    elif activation in GLU_variants.keys():
+        return GLU(
+            in_dim=input_dim, out_dim=output_dim, activation=activation, bias=bias
+        )
+    else:
+        raise ValueError(f"Unsupported activation: {activation}")
 
 
 class GELU(nn.Module):
     """
-    GELU activation function from original ESM repo. 
+    GELU activation function from original ESM repo.
     Using F.gelu yields subtly wrong results.
     """
 
@@ -75,65 +67,37 @@ class GELU(nn.Module):
         return x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0)))
 
 
-class SwiGLU(nn.Module):
+GLU_variants = {
+    "glu": F.sigmoid,
+    "swiglu": F.silu,
+    "geglu": F.gelu,
+    "reglu": F.relu,
+}
+
+
+class GLU(nn.Module):
     """
-    SwiGLU activation function.
-
-    .. note::
-        Depending on whether the dimension is provided, the implementation will be different.
-
-        If the dimension is provided, the input tensor will separately processed by two linear layers,
-        and resulting two tensors will be used to compute the SwiGLU activation, like so:
-
-        ```python
-        gate = self.gate_linear(x)
-        value = self.value_linear(x)
-        return value * F.silu(gate)
-        ```
-
-        If the dimension is not provided, the input tensor will be chunked into two tensors,
-        and the resulting two tensors will be used to compute the SwiGLU activation. This results
-        in the output dimension being half of the input dimension, like so:
-
-        ```python
-        value, gate = x.chunk(2, dim=-1)
-        return value + F.silu(gate)
-        ```
+    Activation function for GLU variants.
 
     Parameters
     ----------
-    dim: int | None
-        Model dimension. If provided, the input tensor will be separately processed by two linear layers.
-        If not provided, the input tensor will be chunked into two tensors, and the resulting two tensors
-        will be used to compute the SwiGLU activation (with the return tensor being half the size of the input tensor).
-
-    Returns
-    -------
-    torch.Tensor
-        The SwiGLU activation of the input tensor.
-
+    in_dim: int
+        Input dimension.
+    out_dim: int
+        Output dimension.
+    activation: str
+        Type of GLU variant.
+    bias: bool
+        Whether to use bias in linear layers.
     """
+
+    def __init__(self, in_dim: int, out_dim: int, activation: str, bias: bool):
+        super().__init__()
+        self.value_linear = nn.Linear(in_dim, out_dim, bias=bias)
+        self.gate_linear = nn.Linear(in_dim, out_dim, bias=bias)
+        self.activation_fn = GLU_variants[activation]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        value, gate = x.chunk(2, dim=-1)
-        return value + F.silu(gate)
-
-
-class GeGLU(nn.Module):
-    """
-    GeGLU activation function.
-    """
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x1, x2 = x.chunk(2, dim=-1)
-        return x1 * F.gelu(x2)
-
-
-class ReGLU(nn.Module):
-    """
-    ReGLU activation function.
-    """
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x1, x2 = x.chunk(2, dim=-1)
-        return x1 * F.relu(x2)
+        value = self.value_linear(x)
+        gate = self.gate_linear(x)
+        return value * self.activation_fn(gate)
