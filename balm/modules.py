@@ -394,26 +394,16 @@ class SparseFFN(nn.Module):
         self.num_experts = num_experts - num_shared_experts # subtract shared experts
         self.num_shared_experts = num_shared_experts
         self.k = k
+        self.router_jitter = router_jitter
         
         # router
-        self.router_type = router_type
-        self.router_jitter = router_jitter
-        if router_type == "topk":
-            self.router = TopKRouter(
-                d_model=model_dim, 
-                num_experts=self.num_experts,
-                router_bias=router_bias,
-                router_dtype=router_dtype,
-            )
-        elif router_type == "expert choice":
-            self.router = ExpertChoiceRouter(
-                d_model=model_dim, 
-                num_experts=self.num_experts,
-                router_bias=router_bias,
-                router_dtype=router_dtype,
-            )
-        else:
-            raise ValueError(f"Invalid router type: {router_type}")
+        router_class = TopKRouter if router_type == "topk" else ExpertChoiceRouter
+        self.router = router_class(
+            d_model=model_dim, 
+            num_experts=self.num_experts,
+            router_bias=router_bias,
+            router_dtype=router_dtype,
+        )
 
         # experts
         ffn_class = GluFFN if "glu" in expert_activation else DenseFFN
@@ -425,7 +415,7 @@ class SparseFFN(nn.Module):
             activation=expert_activation,
         )
         self.experts = nn.ModuleList([expert() for _ in range(self.num_experts)]) # excluding shared expert(s)
-        self.shared_experts = nn.ModuleList([expert() for _ in range(num_shared_experts)])
+        self.shared_experts = nn.ModuleList([expert() for _ in range(self.num_shared_experts)])
 
         # expert capacity (applied to non-shared experts)
         if expert_capacity < 0:

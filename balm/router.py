@@ -211,17 +211,14 @@ class ExpertChoiceRouter(BaseRouter):
     def forward(
         self, 
         x: torch.Tensor, 
-        k: int, 
-        expert_capacity: int
+        expert_capacity: int,
+        **kwargs
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Parameters:
         -----------
         x : torch.Tensor
             Shape: `(num_tokens, d_model)`. Input token representations.
-        
-        k : int
-            Unused by expert choice router. Present for compatibility with TopKRouter
         
         expert_capacity : int
             Maximum number of tokens each expert can process.
