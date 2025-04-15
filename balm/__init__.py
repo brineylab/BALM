@@ -11,7 +11,6 @@ warnings.filterwarnings(
 
 from .activation import *
 from .config import *
-from .data import *
 from .embedding import *
 from .loss import *
 from .models import *
