@@ -21,10 +21,11 @@ __all__ = ["BalmPreTrainedModel", "FreezeBaseModelMixin", "ParameterCountMixin"]
 
 class BalmPreTrainedModel(PreTrainedModel):
     """
-    An abstract class to handle weights initialization and a simple interface for downloading and loading pretrained
-    models.
-    """
+    Handles weight initialization and provides an interface for downloading 
+    and loading pretrained models. Inherits from `PreTrainedModel` in 
+    HuggingFace Transformers.
 
+    """
     supports_gradient_checkpointing = True
 
     # Copied from transformers.models.bert.modeling_bert.BertPreTrainedModel._init_weights
@@ -46,6 +47,13 @@ class BalmPreTrainedModel(PreTrainedModel):
 
 
 class FreezeBaseModelMixin:
+    """
+    Mixin class to freeze the base model's parameters during training.
+
+    This is utilized in the SequenceClassification models, to train only the
+    classifier head while keeping the base model frozen.
+
+    """
     def freeze_base_model(self, base_model: Optional[str] = None):
         if base_model is None:
             if not hasattr(self.__class__, "base_model_prefix"):
@@ -70,6 +78,15 @@ class FreezeBaseModelMixin:
 
 
 class ParameterCountMixin:
+    """
+    Mixin class to count model parameters.
+
+    Supports counting:
+      - All parameters
+      - Only trainable parameters
+      - Only active parameters (for MoE models)
+
+    """
     def count_parameters(
         self,
         only_trainable: bool = True,
@@ -104,6 +121,7 @@ class ParameterCountMixin:
         int or str
             The number of parameters. If `human_readable` is `True`, the number of parameters
             will be returned as a string in a human-readable format.
+        
         """
 
         # check if embeddings should be excluded

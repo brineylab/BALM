@@ -44,7 +44,10 @@ class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
     config_class = BalmConfig
     base_model_prefix = "balm"
 
-    def __init__(self, config: BalmConfig):
+    def __init__(
+        self, 
+        config: BalmConfig
+    ):
         super().__init__(config)
         self.config = config
 
@@ -78,7 +81,6 @@ class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
         """
         Parameters:
         -----------
-
         input_ids: torch.LongTensor
             Tokenized input IDs, of shape (batch_size, sequence_length). Cannot be provided if
             `inputs_embeds` is also provided.
@@ -106,18 +108,8 @@ class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
         Returns:
         --------
         output (tuple or dict):
-            If `return_dict` is ``True``, the output is a ``BaseModelOutput`` object:
-                - last_hidden_state (torch.FloatTensor): last hidden state
-                - hidden_states (torch.FloatTensor): hidden states
-                - attentions (torch.FloatTensor): attention weights
-
-            If `return_dict` is ``False``, the output is a ``tuple`` with the following elements:
-                - last_hidden_state (torch.FloatTensor): last hidden state
-                - hidden_states (torch.FloatTensor): hidden states
-                - attentions (torch.FloatTensor): attention weights
-
-            For attentions and hidden_states, if they are not output, the corresponding
-            value will be ``None`` (for ``BaseModelOutput``) or not returned at all (for ``tuple``).
+            If `return_dict` is ``True``, the output is a ``BaseModelOutput`` object.
+            Otherwise, the output is a tuple.
 
         """
         # parse output options
@@ -264,7 +256,8 @@ class BalmForMaskedLM(BalmPreTrainedModel, FreezeBaseModelMixin, ParameterCountM
         Returns
         -------
         output (tuple or dict):
-            If `return_dict` is ``True``, the output is a ``MaskedLMOutput`` object
+            If `return_dict` is ``True``, the output is a ``MaskedLMOutput`` object.
+            Otherwise, the output is a tuple.
 
         """
         # parse output options
@@ -409,6 +402,13 @@ class BalmForSequenceClassification(
 
         return_dict: bool
             Whether to return a dictionary of outputs (returns a tuple if False)
+        
+        Returns
+        -------
+        output (tuple or dict):
+            If `return_dict` is ``True``, the output is a ``MoESequenceClassifierOutput`` object.
+            Otherwise, the output is a tuple.
+        
         """
         # parse output options
         output_classifier_attentions = output_classifier_attentions if output_classifier_attentions is not None else self.config.output_classifier_attentions

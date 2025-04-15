@@ -46,7 +46,10 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
     config_class = BalmMoEConfig
     base_model_prefix = "balm_moe"
 
-    def __init__(self, config: BalmMoEConfig):
+    def __init__(
+        self,
+        config: BalmMoEConfig,
+    ):
         super().__init__(config)
         self.config = config
 
@@ -61,14 +64,12 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         # layers
         self.layers = nn.ModuleList()
         for layer_idx in range(self.config.num_hidden_layers):
-            if self.config.alternate_sparsity:
-                # alternate dense/sparse layers, dense first
+            if self.config.alternate_sparsity: # alternate dense/sparse layers, dense first
                 if layer_idx % 2 == 0:
                     layer = DenseTransformerLayer(config)
                 else:
                     layer = SparseTransformerLayer(config)
-            else:
-                # all sparse layers
+            else: # all sparse layers
                 layer = SparseTransformerLayer(config)
             self.layers.append(layer)
 
@@ -93,7 +94,6 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         """
         Parameters:
         -----------
-
         input_ids: torch.LongTensor
             Tokenized input IDs
 
@@ -126,26 +126,8 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         Returns:
         --------
         output (tuple or dict):
-            If `return_dict` is ``True``, the output is a ``MoEModelOutput`` object:
-                - last_hidden_state (torch.FloatTensor): last hidden state
-                - hidden_states (torch.FloatTensor): hidden states
-                - attentions (torch.FloatTensor): attention weights
-                - router_logits (torch.FloatTensor): router logits
-                - expert_indexes (torch.LongTensor): expert indexes
-                - z_loss (torch.FloatTensor): router z loss
-                - aux_loss (torch.FloatTensor): router auxiliary loss
-
-            If `return_dict` is ``False``, the output is a ``tuple`` with the following elements:
-                - last_hidden_state (torch.FloatTensor): last hidden state
-                - hidden_states (torch.FloatTensor): hidden states
-                - attentions (torch.FloatTensor): attention weights
-                - router_logits (torch.FloatTensor): router logits
-                - expert_indexes (torch.LongTensor): expert indexes
-                - z_loss (torch.FloatTensor): router z loss
-                - aux_loss (torch.FloatTensor): router auxiliary loss
-
-            For attentions, hidden_states, router_logits, and expert_indexes, if they are not output, the corresponding
-            value will be ``None`` (for ``MoEModelOutput``) or not returned at all (for ``tuple``).
+            If `return_dict` is ``True``, the output is a ``MoEModelOutput`` object.
+            Otherwise, the output is a tuple.
 
         """
         # parse output options
@@ -352,7 +334,8 @@ class BalmMoEForMaskedLM(
         Returns
         -------
         output (tuple or dict):
-            If `return_dict` is ``True``, the output is a ``MoEMaskedLMOutput`` object
+            If `return_dict` is ``True``, the output is a ``MoEMaskedLMOutput`` object.
+            Otherwise, the output is a tuple.
 
         """
         # parse output options
@@ -531,6 +514,13 @@ class BalmMoEForSequenceClassification(
 
         return_dict: bool
             Whether to return a dictionary of outputs (returns a tuple if False)
+        
+        Returns:
+        --------
+        output (tuple or dict):
+            If `return_dict` is ``True``, the output is a ``MoESequenceClassifierOutput`` object.
+            Otherwise, the output is a tuple.
+
         """
         # parse output options
         output_classifier_attentions = output_classifier_attentions if output_classifier_attentions is not None else self.config.output_classifier_attentions
