@@ -1,12 +1,10 @@
-abstar
-abutils
+accelerate
+deepspeed
 datasets
 evaluate
 numpy
-pandas 
-peft
+pandas
 polars
-safetensors
 transformers
 tokenizers
 torch
