@@ -51,6 +51,7 @@ class BalmTokenizer(PreTrainedTokenizerFast):
     def __init__(
         self,
         vocab_file: Optional[str] = None,
+        tokenizer_file: Optional[str] = None,
         bos_token: str = "<cls>",
         eos_token: str = "<eos>",
         unk_token: str = "<unk>",
@@ -58,12 +59,27 @@ class BalmTokenizer(PreTrainedTokenizerFast):
         mask_token: str = "<mask>",
         **kwargs,
     ):
+
+        # load pretrained tokenizer (used by AutoTokenizer)
+        if tokenizer_file is not None:
+            super().__init__(
+                tokenizer_file=tokenizer_file,
+                bos_token=bos_token,
+                eos_token=eos_token,
+                unk_token=unk_token,
+                pad_token=pad_token,
+                mask_token=mask_token,
+                **kwargs,
+            )
+            return
+
         # parse vocab
         if vocab_file is not None and os.path.isfile(vocab_file):
             with open(vocab_file, "r", encoding="utf-8") as f:
                 vocab = [line.strip() for line in f if line.strip()]
         else:
             vocab = DEFAULT_VOCAB
+        
         vocab_dict = {token: i for i, token in enumerate(vocab)}
 
         # create tokenizer
@@ -74,25 +90,19 @@ class BalmTokenizer(PreTrainedTokenizerFast):
             )
         )
 
+        # special token regex
+        special_start_char = Regex(r"[<\[]")
+        special_end_char = Regex(r"[>\]]")
+
+        # non-special token regex
+        pattern = "|".join(re.escape(tok) for tok in vocab if len(tok) == 1)
+
         # pre-tokenization
-        if "sep_token" in locals():
-            special_start_char = sep_token[0]
-            special_end_char = sep_token[-1]
-        elif "bos_token" in locals():
-            special_start_char = bos_token[0]
-            special_end_char = bos_token[-1]
-        else:
-            special_start_char = Regex("|".join(["<", "["]))
-            special_end_char = Regex("|".join([">", "]"]))
-        nonspecial_tokens = [tok for tok in vocab if len(tok) == 1]
-        pattern = "|".join([re.escape(tok) for tok in nonspecial_tokens])
-        tokenizer.pre_tokenizer = Sequence(
-            [
-                Split(special_start_char, behavior="merged_with_next"),
-                Split(special_end_char, behavior="merged_with_previous"),
-                Split(Regex(pattern), behavior="isolated"),
-            ]
-        )
+        tokenizer.pre_tokenizer = Sequence([
+            Split(special_start_char, behavior="merged_with_next"),
+            Split(special_end_char, behavior="merged_with_previous"),
+            Split(Regex(pattern), behavior="isolated"),
+        ])
 
         # post-processing (add bos and eos tokens)
         tokenizer.post_processor = TemplateProcessing(
