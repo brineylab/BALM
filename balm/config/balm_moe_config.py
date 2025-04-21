@@ -86,6 +86,9 @@ class BalmMoEConfig(PretrainedConfig):
     expert_intermediate_size: int, default=None
         The intermediate size of the experts.
         If not provided, defaults to the intermediate_size (`hidden_size` * 4).
+    shared_expert_intermediate_size: int, default=None
+        The intermediate size of the experts.
+        If not provided, defaults to the expert_intermediate_size.
     expert_activation : str, default="swiglu"
         The activation function to use for the experts.
         Options are "swiglu", "relu", "gelu".
@@ -185,6 +188,7 @@ class BalmMoEConfig(PretrainedConfig):
         expert_capacity_type: str = "multiplier",
         expert_capacity: int = 1,
         expert_intermediate_size: Optional[int] = None,
+        shared_expert_intermediate_size: Optional[int] = None,
         expert_activation: str = "swiglu",
         expert_dropout: Optional[float] = None,
         expert_bias: bool = True,
@@ -243,7 +247,12 @@ class BalmMoEConfig(PretrainedConfig):
         self.router_z_loss_coef = float(router_z_loss_coef)
         self.expert_capacity_type = expert_capacity_type.lower()
         self.expert_capacity = expert_capacity
-        self.expert_intermediate_size = int(expert_intermediate_size or self.intermediate_size)
+        self.expert_intermediate_size = int(
+            expert_intermediate_size or self.intermediate_size
+        )
+        self.shared_expert_intermediate_size = int(
+            shared_expert_intermediate_size or self.expert_intermediate_size
+        )
         self.expert_activation = expert_activation.lower()
         self.expert_dropout = float(
             expert_dropout if expert_dropout is not None else dropout
