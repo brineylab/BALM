@@ -180,13 +180,13 @@ class ParameterCountMixin:
                 # shared experts, if any (fully active)
                 if num_shared_experts > 0:
                     shared_expert_params = sum(
-                        p.numel() for p in moe.experts[:num_shared_experts].parameters()
+                        p.numel() for p in moe.shared_experts.parameters()
                     )
                     total_num_params += shared_expert_params
 
                 # experts (partially active)
                 total_expert_params = sum(
-                    p.numel() for p in moe.experts[num_shared_experts:].parameters()
+                    p.numel() for p in moe.experts.parameters()
                 )
                 active_expert_params = total_expert_params * prop_tokens_per_expert
                 total_num_params += active_expert_params
