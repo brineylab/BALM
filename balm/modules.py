@@ -779,7 +779,7 @@ class SparseTransformerLayer(nn.Module):
         )
         self.sparse_ffn = SparseFFN(
             model_dim=config.hidden_size,
-            ffn_dim=config.intermediate_size,
+            ffn_dim=config.expert_intermediate_size,
             expert_activation=config.expert_activation,
             expert_bias=config.expert_bias,
             num_experts=config.num_experts,
