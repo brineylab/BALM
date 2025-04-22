@@ -349,6 +349,7 @@ class SparseFFN(nn.Module):
         self,
         model_dim: int,
         ffn_dim: int,
+        shared_ffn_dim: int,
         num_experts: int,
         num_shared_experts: int,
         expert_capacity_type: str,
@@ -378,19 +379,24 @@ class SparseFFN(nn.Module):
 
         # experts
         ffn_class = GluFFN if "glu" in expert_activation else DenseFFN
-        expert = partial(
-            ffn_class,
-            model_dim=model_dim,
-            ffn_dim=ffn_dim,
-            bias=expert_bias,
-            activation=expert_activation,
-        )
-        self.experts = nn.ModuleList(
-            [expert() for _ in range(self.num_experts)]
-        )  # excluding shared expert(s)
-        self.shared_experts = nn.ModuleList(
-            [expert() for _ in range(self.num_shared_experts)]
-        )
+        self.experts = nn.ModuleList([
+            ffn_class(
+                model_dim=model_dim,
+                ffn_dim=ffn_dim,
+                bias=expert_bias,
+                activation=expert_activation,
+            )
+            for _ in range(self.num_experts)
+        ])  # excluding shared expert(s)
+        self.shared_experts = nn.ModuleList([
+            ffn_class(
+                model_dim=model_dim,
+                ffn_dim=shared_ffn_dim,
+                bias=expert_bias,
+                activation=expert_activation,
+            )
+            for _ in range(self.num_shared_experts)
+        ])
 
         # expert capacity (applied to non-shared experts)
         if expert_capacity < 0:
@@ -779,7 +785,8 @@ class SparseTransformerLayer(nn.Module):
         )
         self.sparse_ffn = SparseFFN(
             model_dim=config.hidden_size,
-            ffn_dim=config.intermediate_size,
+            ffn_dim=config.expert_intermediate_size,
+            shared_ffn_dim=config.shared_expert_intermediate_size,
             expert_activation=config.expert_activation,
             expert_bias=config.expert_bias,
             num_experts=config.num_experts,
