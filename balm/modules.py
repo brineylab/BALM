@@ -510,15 +510,13 @@ class SparseFFN(nn.Module):
 
         # shared expert(s)
         for expert_idx, expert in enumerate(self.shared_experts):
-            # get expert input for all tokens
-            expert_input = x_flat
 
-            # compute expert output
-            # don't scale by routing probability because not passed through router
-            expert_output = expert(expert_input)
+            # compute expert output for all tokens
+            # no scaling by routing probability
+            shared_output = expert(x_flat)
 
             # accumulate expert output
-            output += expert_output
+            output += shared_output
 
         output = output.view(batch_size, seq_len, d_model)
         return output, (router_logits, router_probs, expert_probs, expert_indices)
