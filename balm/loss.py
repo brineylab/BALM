@@ -53,12 +53,10 @@ def router_load_balancing_loss(
     Calculates the loss prior to dropping overflowed tokens, as demonstrated in figure
     (15) of the paper.
 
-    Differing from the original `Switch Transformer paper`_, this is a more general
-    implementation that supports both K=1 (top-1 routing) and K>1 (top-k routing):
-      - for K=1 (top-1 routing), this reduces to the Switch Transformer load balancing loss.
-      - for K>1 (top-k routing), this correctly accounts for multiple experts chosen per token.
+    Differing from the original `Switch Transformer paper`_, this implementation supports
+    K>1 (top-k routing) where each token chooses multiple experts
 
-    Implementation is slighlty modified from the `Mixtral implementation`_.
+    Implementation is slightly modified from the `Mixtral implementation`_.
 
     Parameters
     ----------
