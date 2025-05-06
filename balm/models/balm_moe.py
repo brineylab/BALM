@@ -55,14 +55,15 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         # layers
         self.layers = nn.ModuleList()
         for layer_idx in range(self.config.num_hidden_layers):
-            if (
-                self.config.alternate_sparsity
-            ):  # alternate dense/sparse layers, dense first
-                if layer_idx % 2 == 0:
-                    layer = DenseTransformerLayer(config)
-                else:
+            if self.config.num_initial_dense_layers > layer_idx:
+                layer = DenseTransformerLayer(config)
+            elif self.config.alternate_sparsity: # alternate dense/sparse layers
+                offset_idx = layer_idx - self.config.num_initial_dense_layers
+                if offset_idx % 2 == 0:
                     layer = SparseTransformerLayer(config)
-            else:  # all sparse layers
+                else:
+                    layer = DenseTransformerLayer(config)
+            else:  # sparse layers
                 layer = SparseTransformerLayer(config)
             self.layers.append(layer)
 

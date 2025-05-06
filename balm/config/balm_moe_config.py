@@ -58,6 +58,8 @@ class BalmMoEConfig(PretrainedConfig):
         The number of shared experts (which receive all tokens) in the model.
     num_experts_per_tok : int, default=1
         The number of experts to route each token to. Only used if `router_type` is "topk".
+    num_initial_dense_layers: int, default=1
+        The number of dense layers at the start of the model before any sparse layers.
     alternate_sparsity : bool, default=True
         Whether to use alternate sparse and dense layers.
     router_type : str, default="topk"
@@ -175,6 +177,7 @@ class BalmMoEConfig(PretrainedConfig):
         num_experts: int = 8,
         num_shared_experts: int = 0,
         num_experts_per_tok: int = 1,  # k for top-k routing (to comply with 🤗 naming)
+        num_initial_dense_layers: int = 1,
         alternate_sparsity: bool = True,
         # router
         router_type: str = "topk",
@@ -238,6 +241,7 @@ class BalmMoEConfig(PretrainedConfig):
         self.num_experts = int(num_experts)
         self.num_shared_experts = int(num_shared_experts)
         self.num_experts_per_tok = int(num_experts_per_tok)
+        self.num_initial_dense_layers = int(num_initial_dense_layers)
         self.alternate_sparsity = bool(alternate_sparsity)
         self.router_type = self._standardize_router_type(router_type)
         self.router_dtype = router_dtype.lower()
