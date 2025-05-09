@@ -2,7 +2,7 @@
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
-from typing import Optional, Union
+from typing import Optional, Union, List
 
 import torch
 from transformers import PretrainedConfig
@@ -72,25 +72,33 @@ class BalmMoEConfig(PretrainedConfig):
         Jitter to apply to inputs of the router.
     router_bias: bool, default=False
         Whether to use a bias in the router.
-    router_aux_loss_coef : float, default=0.01
+    router_aux_loss_coef: float, default=0.01
         The coefficient for the auxiliary loss.
-    router_z_loss_coef : float, default=0.001
+    router_z_loss_coef: float, default=0.001
         The coefficient for the z-loss.
-    expert_capacity_type : str, default="multiplier"
+    use_p_penalty_loss: bool, default=False
+        Whether or not to use p-penalty loss instead of standard aux loss.
+    router_penalty_loss_coef: float, default=0.01
+        The coefficient for the p-penalty loss.
+    expert_capacity_type: str, default="multiplier"
         The type of expert capacity to use.
         If "absolute": tokens per expert; if "multiplier": capacity = multiplier * max_position_embeddings
-    expert_capacity : int, default=1
+    expert_capacity: int, default=1
         The capacity of each expert, excluding shared experts.
         If `expert_capacity_type` is "absolute", this value is translated as the actual token capacity of each expert.
         If `expert_capacity_type` is "multiplier", this value is translated as the multiplier with which the total
         expert capacity is calculated (i.e. each expert capacity = multiplier * max_position_embeddings / num_experts).
         If capacity is less than 0, no expert capacity is set. This is only compatible with TopK routing.
-    expert_intermediate_size: int, default=None
+    expert_intermediate_size: Union[int, List], default=None
         The intermediate size of the experts.
-        If not provided, defaults to the intermediate_size (`hidden_size` * 4).
+        If provided as an int, all experts will have the same size (homogeneous).
+        If provided as a list, expert sizes will correspond to the sizes in the list (heterogeneous)
+        If not provided, defaults to the intermediate_size.
     shared_expert_intermediate_size: int, default=None
         The intermediate size of the experts.
-        If not provided, defaults to the expert_intermediate_size.
+        If not provided:
+            - If `expert_intermediate_size` is an integer, defaults to `expert_intermediate_size`.
+            - If `expert_intermediate_size` is a list, defaults to the `intermediate_size`.
     expert_activation : str, default="swiglu"
         The activation function to use for the experts.
         Options are "swiglu", "relu", "gelu".
@@ -186,11 +194,14 @@ class BalmMoEConfig(PretrainedConfig):
         router_bias: bool = False,
         # router losses
         router_aux_loss_coef: float = 0.01,
+        router_mask_aux_loss: bool = False,
         router_z_loss_coef: float = 0.001,
+        router_use_penalty_loss: bool = False,
+        router_penalty_loss_coef: float = 0.1,
         # experts
         expert_capacity_type: str = "multiplier",
         expert_capacity: int = 1,
-        expert_intermediate_size: Optional[int] = None,
+        expert_intermediate_size: Optional[Union[int, List[int]]] = None,
         shared_expert_intermediate_size: Optional[int] = None,
         expert_activation: str = "swiglu",
         expert_dropout: Optional[float] = None,
@@ -248,14 +259,18 @@ class BalmMoEConfig(PretrainedConfig):
         self.router_jitter = float(router_jitter)
         self.router_bias = bool(router_bias)
         self.router_aux_loss_coef = float(router_aux_loss_coef)
+        self.router_mask_aux_loss = bool(router_mask_aux_loss)
         self.router_z_loss_coef = float(router_z_loss_coef)
+        self.router_use_penalty_loss = bool(router_use_penalty_loss)
+        self.router_penalty_loss_coef = float(router_penalty_loss_coef)
         self.expert_capacity_type = expert_capacity_type.lower()
         self.expert_capacity = expert_capacity
-        self.expert_intermediate_size = int(
-            expert_intermediate_size or self.intermediate_size
+        self.expert_intermediate_size = self._get_expert_sizes(
+            expert_intermediate_size=expert_intermediate_size
         )
-        self.shared_expert_intermediate_size = int(
-            shared_expert_intermediate_size or self.expert_intermediate_size
+        self.shared_expert_intermediate_size = self._get_shared_expert_size(
+            shared_expert_intermediate_size=shared_expert_intermediate_size,
+            expert_intermediate_size=expert_intermediate_size,
         )
         self.expert_activation = expert_activation.lower()
         self.expert_dropout = float(
@@ -341,6 +356,56 @@ class BalmMoEConfig(PretrainedConfig):
             raise ValueError(
                 f"Invalid router type: {router_type}. Options are 'topk' or 'expert choice'."
             )
+
+    def _get_expert_sizes(
+        self, expert_intermediate_size: Union[int, List[int]]
+    ) -> List:
+        num_experts = self.num_experts - self.num_shared_experts
+
+        # default to intermediate size
+        if expert_intermediate_size is None:
+            expert_intermediate_size = self.intermediate_size
+
+        # homogeneous experts
+        if isinstance(expert_intermediate_size, int):
+            self.homogeneous_experts = True
+            return [expert_intermediate_size] * num_experts
+
+        # heterogeneous experts
+        elif isinstance(expert_intermediate_size, List):
+            if len(expert_intermediate_size) != num_experts:
+                raise ValueError(
+                    f"Length of expert_intermediate_size ({len(expert_intermediate_size)}) "
+                    f"must match number of non-shared experts ({num_experts})"
+                )
+            if not all(isinstance(x, int) for x in expert_intermediate_size):
+                raise ValueError(
+                    "All elements of expert_intermediate_size must be integers."
+                )
+            if self.router_type == "expert choice":
+                raise ValueError(
+                    "Heterogeneous expert sizes are not compatible with the expert choice router."
+                )
+            self.homogeneous_experts = False
+            return expert_intermediate_size
+
+        raise TypeError(
+            "Invalid expert_intermediate_size. Must be an int, list of ints, or None."
+        )
+
+    def _get_shared_expert_size(
+        self,
+        shared_expert_intermediate_size: int,
+        expert_intermediate_size: Union[int, List[int]],
+    ) -> int:
+        # return directly if provided
+        if shared_expert_intermediate_size is not None:
+            return int(shared_expert_intermediate_size)
+        # use expert intermediate size if it was provided as an int
+        if isinstance(expert_intermediate_size, int):
+            return expert_intermediate_size
+        # otherwise use intermediate size
+        return self.intermediate_size
 
     def _get_classifier_activation(
         self, activation: Optional[str], use_attention: bool

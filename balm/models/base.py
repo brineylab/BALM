@@ -75,6 +75,8 @@ class FreezeBaseModelMixin:
             self.router_z_loss_coef = 0.0
         if hasattr(self, "router_aux_loss_coef"):
             self.router_aux_loss_coef = 0.0
+        if hasattr(self, "router_penalty_loss_coef"):
+            self.router_penalty_loss_coef = 0.0
 
 
 class ParameterCountMixin:

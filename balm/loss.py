@@ -2,12 +2,11 @@
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
-from typing import Optional
+from typing import Optional, List
 
 import torch
-from torch.nn import functional as F
 
-__all__ = ["router_z_loss", "router_load_balancing_loss"]
+__all__ = ["router_z_loss", "router_load_balancing_loss", "router_p_penalty_loss"]
 
 
 def router_z_loss(router_logits: torch.Tensor) -> torch.Tensor:
@@ -131,4 +130,59 @@ def router_load_balancing_loss(
     overall_loss = (
         torch.sum(tokens_per_expert * router_prob_per_expert.unsqueeze(0)) * num_experts
     )
+    return overall_loss
+
+
+def router_p_penalty_loss(
+    router_probs: torch.Tensor, k: int, expert_hidden_sizes: List
+) -> torch.Tensor:
+    """
+    Computes the parameter penalty (P-Penalty) loss.
+
+    See the `HMoE paper`_ for more details.
+
+    Parameters
+    ----------
+    router_probs : torch.Tensor
+        Concatenated router probs for all sparse layers. Shape is [num_tokens, num_experts],
+        where num_tokens is (batch_size * seq_len * num_sparse_layers)
+    k: int
+        Number of experts each token is routed to (for topK routing).
+    expert_hidden_sizes: torch.Tensor
+        Hidden sizes of the experts.
+
+    Returns
+    -------
+    torch.Tensor
+        The p-penalty loss for the router.
+
+    References
+    ----------
+    .. _HMoE paper:
+        https://arxiv.org/abs/2408.10681
+    """
+
+    _, num_experts = router_probs.shape
+    device = router_probs.device
+
+    # apply top-k across probs for all layers ==> (num_tokens, k)
+    _, selected_experts = torch.topk(router_probs, k, dim=-1)
+
+    # generate expert mask ==> (num_tokens, k, num_experts)
+    expert_mask = torch.nn.functional.one_hot(selected_experts, num_experts)
+
+    # tokens routed to each expert ==> (k, num_experts)
+    tokens_per_expert = torch.mean(expert_mask.float(), dim=0)
+
+    # apply penalty based on expert hidden sizes
+    # normalize expert hidden sizes such that the p penalty loss
+    # reduces to aux loss when all experts are the same size
+    expert_hidden_sizes = torch.tensor(expert_hidden_sizes, device=device)
+    normalized_dims = expert_hidden_sizes / expert_hidden_sizes.min()
+    penalty = tokens_per_expert * normalized_dims
+
+    # avg probability of routing to each experts ==> (num_experts)
+    router_prob_per_expert = torch.mean(router_probs, dim=0)
+
+    overall_loss = torch.sum(penalty * router_prob_per_expert.unsqueeze(0))
     return overall_loss

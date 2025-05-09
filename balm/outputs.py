@@ -140,6 +140,7 @@ class MoEModelOutput(BalmModelOutput):
     expert_indexes: Optional[Tuple[torch.LongTensor]] = None
     z_loss: torch.FloatTensor = None
     aux_loss: torch.FloatTensor = None
+    penalty_loss: torch.FloatTensor = None
 
 
 @dataclass
@@ -177,6 +178,7 @@ class MoEMaskedLMOutput(BalmModelOutput):
     expert_indexes: Optional[Tuple[torch.LongTensor]] = None
     z_loss: torch.FloatTensor = None
     aux_loss: torch.FloatTensor = None
+    penalty_loss: torch.FloatTensor = None
     lm_loss: torch.FloatTensor = None
 
 
@@ -218,4 +220,5 @@ class MoESequenceClassifierOutput(BalmModelOutput):
     classifier_attentions: Optional[torch.FloatTensor] = None
     z_loss: torch.FloatTensor = None
     aux_loss: torch.FloatTensor = None
+    penalty_loss: torch.FloatTensor = None
     classifier_loss: torch.FloatTensor = None
