@@ -29,6 +29,8 @@ __all__ = ["MoETrainer"]
 
 loss_mapping = {
     "topk": ["lm_loss", "aux_loss", "z_loss"],
+    "topk-penalty": ["lm_loss", "penalty_loss"],
+    "topk-aux": ["lm_loss", "aux_loss"],
     "expert choice": ["lm_loss", "z_loss"],
 }
 
@@ -52,8 +54,8 @@ class AddExtraLossesToTrainerState(TrainerCallback):
 
 class MoETrainer(Trainer):
     """
-    Custom Trainer to support logging MoE loss components (lm_loss, aux_loss, and z_loss)
-    during training and evaluation.
+    Custom Trainer to support logging MoE loss components during
+    training and evaluation.
     """
 
     def __init__(self, extra_losses: Optional[List[str]] = None, **kwargs):
@@ -61,8 +63,14 @@ class MoETrainer(Trainer):
 
         # extra_losses based on router type (if not provided)
         self.router_type = self.model.config.router_type
+        if self.model.config.homogeneous_experts:
+            router_str = self.router_type
+        else:
+            penalty = self.model.config.router_use_penalty_loss
+            router_str = f"{self.router_type}{'-penalty' if penalty else '-aux'}"
+        
         extra_losses = (
-            loss_mapping[self.router_type] if extra_losses is None else extra_losses
+            loss_mapping[router_str] if extra_losses is None else extra_losses
         )
 
         # add callback for logging extra train losses
@@ -184,6 +192,12 @@ class MoETrainer(Trainer):
                 metrics["lm_loss"] = lm_loss.mean()
                 metrics["z_loss"] = z_loss.mean()
                 metrics["aux_loss"] = aux_loss.mean()
+            elif (
+                self.router_type == "topk" and len(predictions) == 3
+            ):  # homogeneous experts
+                _, penalty_loss, lm_loss = predictions
+                metrics["lm_loss"] = lm_loss.mean()
+                metrics["penalty_loss"] = penalty_loss.mean()
             # expert choice
             elif self.router_type == "expert choice" and len(predictions) == 3:
                 _, z_loss, lm_loss = predictions

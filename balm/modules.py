@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 from functools import partial
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, List
 
 import torch
 import torch.nn as nn
@@ -318,8 +318,8 @@ class SparseFFN(nn.Module):
     -----------
     model_dim: int
         Token embedding dimension.
-    ffn_dim: int, default=None
-        Feed-forward network dimension. If not provided, it will be set to 4x the model dimension.
+    expert_ffn_dims: List
+        List of the feed-forward dimensions for each expert.
     num_experts: int
         Number of experts.
     num_shared_experts: int
@@ -348,7 +348,7 @@ class SparseFFN(nn.Module):
     def __init__(
         self,
         model_dim: int,
-        ffn_dim: int,
+        expert_ffn_dims: List,
         shared_ffn_dim: int,
         num_experts: int,
         num_shared_experts: int,
@@ -386,7 +386,7 @@ class SparseFFN(nn.Module):
                 bias=expert_bias,
                 activation=expert_activation,
             )
-            for _ in range(self.num_experts)
+            for ffn_dim in expert_ffn_dims
         ])  # excluding shared expert(s)
         self.shared_experts = nn.ModuleList([
             ffn_class(
@@ -510,15 +510,13 @@ class SparseFFN(nn.Module):
 
         # shared expert(s)
         for expert_idx, expert in enumerate(self.shared_experts):
-            # get expert input for all tokens
-            expert_input = x_flat
 
-            # compute expert output
-            # don't scale by routing probability because not passed through router
-            expert_output = expert(expert_input)
+            # compute expert output for all tokens
+            # no scaling by routing probability
+            shared_output = expert(x_flat)
 
             # accumulate expert output
-            output += expert_output
+            output += shared_output
 
         output = output.view(batch_size, seq_len, d_model)
         return output, (router_logits, router_probs, expert_probs, expert_indices)
@@ -785,7 +783,7 @@ class SparseTransformerLayer(nn.Module):
         )
         self.sparse_ffn = SparseFFN(
             model_dim=config.hidden_size,
-            ffn_dim=config.expert_intermediate_size,
+            expert_ffn_dims=config.expert_intermediate_size,
             shared_ffn_dim=config.shared_expert_intermediate_size,
             expert_activation=config.expert_activation,
             expert_bias=config.expert_bias,
