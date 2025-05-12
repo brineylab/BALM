@@ -633,7 +633,7 @@ class BalmMoEForSequenceClassification(
             if self.config.router_type == "expert choice":
                 z_loss = self.router_z_loss_coef * (outputs.z_loss)
                 loss = classifier_loss + z_loss
-            elif self.config.router_use_penalty_loss:
+            elif self.config.homogeneous_experts:
                 aux_loss = self.router_aux_loss_coef * (outputs.aux_loss)
                 z_loss = self.router_z_loss_coef * (outputs.z_loss)
                 loss = classifier_loss + z_loss + aux_loss
