@@ -7,9 +7,8 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import PretrainedConfig
 
-__all__ = ["TopKRouter", "ExpertChoiceRouter"]
+__all__ = ["TopKRouter", "TopPRouter", "ExpertChoiceRouter"]
 
 
 class BaseRouter(nn.Module):
@@ -153,7 +152,7 @@ class TopKRouter(BaseRouter):
             device=probs.device,
         )
 
-        # for each expert, pick up to 'expert_capacity' tokens in order of highest expert affiniy
+        # for each expert, pick up to 'expert_capacity' tokens in order of highest expert affinity
         # loop over experts, grouping slots that picked each expert
         for e in range(num_experts):
             # select token_ids and probs for expert e only
@@ -178,6 +177,93 @@ class TopKRouter(BaseRouter):
                 expert_indices[e, :keep] = chosen_token_ids[sorted_idx]
 
         return logits, probs, expert_probs, expert_indices
+
+
+class TopPRouter(BaseRouter):
+    """
+    Router that implements the "Top-P" strategy, introduced in the `Dynamic MoE Paper`_.
+
+    .. _Dynamic MoE Paper:
+        https://arxiv.org/abs/2403.07652
+
+    .. _Dynamic MoE Code:
+        https://github.com/ZhenweiAn/Dynamic_MoE/blob/main/modeling/modeling_moe.py
+
+    """
+
+    def __init__(
+        self,
+        d_model: int,
+        num_experts: int,
+        router_bias: bool,
+        router_dtype: str,
+        top_p_threshold: Optional[float] = 0.7,
+    ):
+        self.threshold = top_p_threshold
+        super().__init__(
+            d_model=d_model,
+            num_experts=num_experts,
+            router_bias=router_bias,
+            router_dtype=router_dtype,
+        )
+
+    def forward(self, x: torch.Tensor, k: int, expert_capacity: int):
+        """
+        Parameters:
+        -----------
+        x : torch.Tensor
+            Shape: `(num_tokens, d_model)`. Input token representations.
+        k : int
+            Maximum number of experts each token can choose.
+        expert_capacity : int
+            Maximum number of tokens each expert can process.
+
+        Returns:
+        --------
+        logits : torch.Tensor
+            Raw routing scores `(num_tokens, num_experts)`.
+        probs : torch.Tensor
+            Routing probabilities `(num_tokens, num_experts)`.
+        expert_probs : torch.Tensor
+            Selected token probabilities for each expert `(num_experts, expert_capacity)`.
+        expert_indices : torch.Tensor
+            Token indices assigned to each expert `(num_experts, expert_capacity)`.
+        """
+
+        num_tokens = x.size(0)
+        num_experts = self.linear.out_features
+        k = min(k, num_experts)
+
+        torch.set_printoptions(profile="full")
+
+        # compute routing logits and probs ==> (num_tokens, num_experts)
+        logits = self.linear(x)
+
+        # softmax in higher precision (fp32 for stability)
+        probs = F.softmax(logits, dim=-1, dtype=self.router_dtype)
+
+        # sort probs
+        sorted_probs, sorted_indices = torch.sort(probs, descending=True)
+
+        # cumulative probs
+        cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+        mask = cumulative_probs > self.threshold
+
+        # find threshold indices
+        threshold_indices = mask.long().argmax(dim=-1)
+        threshold_mask = torch.nn.functional.one_hot(
+            threshold_indices, num_classes=sorted_indices.size(-1)
+        ).bool()
+
+        # apply masks ==> (num_tokens, num_experts)
+        mask = mask & ~threshold_mask
+        sorted_indices = torch.where(mask, -1, sorted_indices)
+        sorted_probs = torch.where(mask, 0.0, sorted_probs)
+
+        # reshape indices and probs
+        raise Exception()
+
+        return logits, probs, sorted_probs, sorted_indices
 
 
 class ExpertChoiceRouter(BaseRouter):

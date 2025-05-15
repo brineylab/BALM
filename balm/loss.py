@@ -127,10 +127,9 @@ def router_load_balancing_loss(
             router_probs * router_per_expert_attention_mask, dim=0
         ) / torch.sum(router_per_expert_attention_mask, dim=0)
 
-    overall_loss = (
+    return (
         torch.sum(tokens_per_expert * router_prob_per_expert.unsqueeze(0)) * num_experts
     )
-    return overall_loss
 
 
 def router_p_penalty_loss(
@@ -185,4 +184,36 @@ def router_p_penalty_loss(
     router_prob_per_expert = torch.mean(router_probs, dim=0)
 
     overall_loss = torch.sum(penalty * router_prob_per_expert.unsqueeze(0))
-    return overall_loss
+    return overall_loss * num_experts
+
+
+def router_dynamic_loss(
+    router_probs: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Computes the dynamic entropy loss for Top-P models.
+
+    See the `Dynamic Routing paper`_ for more details.
+
+    Parameters
+    ----------
+    router_probs : torch.Tensor
+        Concatenated router probs for all sparse layers. Shape is [num_tokens, num_experts],
+        where num_tokens is (batch_size * seq_len * num_sparse_layers)
+
+    Returns
+    -------
+    torch.Tensor
+        The dynamic entropy loss for the router.
+
+    References
+    ----------
+    .. _Dynamic Routing paper:
+        https://arxiv.org/abs/2403.07652
+    """
+
+    loss = -torch.sum(router_probs * torch.log(router_probs), dim=-1)
+    print(loss)
+    raise Exception()
+
+    return loss.mean()

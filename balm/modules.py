@@ -11,7 +11,7 @@ import torch.nn.functional as F
 
 from .activation import get_activation_fn
 from .embedding import RotaryPositionalEmbedding
-from .router import ExpertChoiceRouter, TopKRouter
+from .router import ExpertChoiceRouter, TopKRouter, TopPRouter
 from transformers import PretrainedConfig
 
 __all__ = [
@@ -26,6 +26,12 @@ __all__ = [
     "BalmSequenceClassificationHead",
     "BalmAttentionSequenceClassificationHead",
 ]
+
+ROUTER_MAPPING = {
+    "top-k": TopKRouter,
+    "top-p": TopPRouter,
+    "expert-choice": ExpertChoiceRouter,
+}
 
 
 # =================================
@@ -330,9 +336,9 @@ class SparseFFN(nn.Module):
     expert_capacity: Union[int, float]
         Expert capacity, either absolute or multiplier based on expert_capacity_type
     k: int, default=1
-        Number of experts per token. Used in "topk" routing only.
-    router_type: str, default="topk"
-        Router type. Options are "topk" or "expert choice".
+        Number of experts per token. Used in "top-k" routing only.
+    router_type: str, default="top-k"
+        Router type. Options are "top-k", "top-p", or "expert-choice".
     router_bias: bool, default=False
         Whether to use bias in the router.
     router_dtype: torch.dtype
@@ -355,7 +361,7 @@ class SparseFFN(nn.Module):
         expert_capacity_type: str,
         expert_capacity: Union[int, float],
         k: int = 1,
-        router_type: str = "topk",
+        router_type: str = "top-k",
         router_bias: bool = False,
         router_dtype: str = "float32",
         router_jitter: float = 0.0,
@@ -369,7 +375,7 @@ class SparseFFN(nn.Module):
         self.router_jitter = router_jitter
 
         # router
-        router_class = TopKRouter if router_type == "topk" else ExpertChoiceRouter
+        router_class = ROUTER_MAPPING[router_type]
         self.router = router_class(
             d_model=model_dim,
             num_experts=self.num_experts,
