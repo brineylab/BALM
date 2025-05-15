@@ -382,7 +382,7 @@ class BalmMoEConfig(PretrainedConfig):
                 raise ValueError(
                     "All elements of expert_intermediate_size must be integers."
                 )
-            if self.router_type == "expert choice":
+            if (self.router_type == "expert-choice") and (len(set(expert_intermediate_size)) > 1):
                 raise ValueError(
                     "Heterogeneous expert sizes are not compatible with the expert choice router."
                 )
