@@ -28,9 +28,9 @@ __all__ = ["MoETrainer"]
 
 
 loss_mapping = {
-    "topk": ["lm_loss", "aux_loss", "z_loss"],
-    "topk-penalty": ["lm_loss", "penalty_loss"],
-    "topk-aux": ["lm_loss", "aux_loss"],
+    "top-k": ["lm_loss", "aux_loss", "z_loss"],
+    "top-k-penalty": ["lm_loss", "penalty_loss"],
+    "top-k-aux": ["lm_loss", "aux_loss"],
     "expert choice": ["lm_loss", "z_loss"],
 }
 
