@@ -177,7 +177,7 @@ def router_p_penalty_loss(
     # normalize expert hidden sizes such that the p penalty loss
     # reduces to aux loss when all experts are the same size
     expert_hidden_sizes = torch.tensor(expert_hidden_sizes, device=device)
-    normalized_dims = expert_hidden_sizes / expert_hidden_sizes.min()
+    normalized_dims = expert_hidden_sizes / expert_hidden_sizes.max()
     penalty = tokens_per_expert * normalized_dims
 
     # avg probability of routing to each experts ==> (num_experts)
