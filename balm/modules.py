@@ -360,7 +360,8 @@ class SparseFFN(nn.Module):
         num_shared_experts: int,
         expert_capacity_type: str,
         expert_capacity: Union[int, float],
-        k: int = 1,
+        k: int,
+        top_p_threshold: float,
         router_type: str = "top-k",
         router_bias: bool = False,
         router_dtype: str = "float32",
@@ -371,7 +372,6 @@ class SparseFFN(nn.Module):
         super().__init__()
         self.num_experts = num_experts - num_shared_experts  # subtract shared experts
         self.num_shared_experts = num_shared_experts
-        self.k = k
         self.router_jitter = router_jitter
 
         # router
@@ -381,28 +381,34 @@ class SparseFFN(nn.Module):
             num_experts=self.num_experts,
             router_bias=router_bias,
             router_dtype=router_dtype,
+            k=k,
+            top_p_threshold=top_p_threshold,
         )
 
         # experts
         ffn_class = GluFFN if "glu" in expert_activation else DenseFFN
-        self.experts = nn.ModuleList([
-            ffn_class(
-                model_dim=model_dim,
-                ffn_dim=ffn_dim,
-                bias=expert_bias,
-                activation=expert_activation,
-            )
-            for ffn_dim in expert_ffn_dims
-        ])  # excluding shared expert(s)
-        self.shared_experts = nn.ModuleList([
-            ffn_class(
-                model_dim=model_dim,
-                ffn_dim=shared_ffn_dim,
-                bias=expert_bias,
-                activation=expert_activation,
-            )
-            for _ in range(self.num_shared_experts)
-        ])
+        self.experts = nn.ModuleList(
+            [
+                ffn_class(
+                    model_dim=model_dim,
+                    ffn_dim=ffn_dim,
+                    bias=expert_bias,
+                    activation=expert_activation,
+                )
+                for ffn_dim in expert_ffn_dims
+            ]
+        )  # excluding shared expert(s)
+        self.shared_experts = nn.ModuleList(
+            [
+                ffn_class(
+                    model_dim=model_dim,
+                    ffn_dim=shared_ffn_dim,
+                    bias=expert_bias,
+                    activation=expert_activation,
+                )
+                for _ in range(self.num_shared_experts)
+            ]
+        )
 
         # expert capacity (applied to non-shared experts)
         if expert_capacity < 0:
@@ -433,7 +439,6 @@ class SparseFFN(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        padding_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Forward pass for the SparseFFN layer.
@@ -480,7 +485,6 @@ class SparseFFN(nn.Module):
         # probs and indices are shape (num_experts, expert_capacity)
         router_logits, router_probs, expert_probs, expert_indices = self.router(
             x_flat,
-            k=self.k,
             expert_capacity=capacity,
         )
 
@@ -798,6 +802,7 @@ class SparseTransformerLayer(nn.Module):
             expert_capacity_type=config.expert_capacity_type,
             expert_capacity=config.expert_capacity,
             k=config.num_experts_per_tok,
+            top_p_threshold=config.top_p_threshold,
             router_type=config.router_type,
             router_bias=config.router_bias,
             router_dtype=config.router_dtype,
@@ -854,7 +859,7 @@ class SparseTransformerLayer(nn.Module):
         # sparse FFN
         residual = x
         x = self.ffn_layer_norm(x)
-        ffn_out, router_tuple = self.sparse_ffn(x, padding_mask=padding_mask)
+        ffn_out, router_tuple = self.sparse_ffn(x)
         x = residual + self.ffn_dropout(ffn_out)
 
         return (x, attn_vals, router_tuple) if need_weights else (x, router_tuple)

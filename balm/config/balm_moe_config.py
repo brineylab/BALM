@@ -58,6 +58,8 @@ class BalmMoEConfig(PretrainedConfig):
         The number of shared experts (which receive all tokens) in the model.
     num_experts_per_tok : int, default=1
         The number of experts to route each token to. Only used if `router_type` is "top-k".
+    top_p_threshold: float, default=0.5
+        The probability threshold for "top-p" routing. Only used if `router_type` is "top-p".
     num_initial_dense_layers: int, default=1
         The number of dense layers at the start of the model before any sparse layers.
     alternate_sparsity : bool, default=True
@@ -185,6 +187,7 @@ class BalmMoEConfig(PretrainedConfig):
         num_experts: int = 8,
         num_shared_experts: int = 0,
         num_experts_per_tok: int = 1,  # k for top-k routing (to comply with 🤗 naming)
+        top_p_threshold: float = 0.5,
         num_initial_dense_layers: int = 1,
         alternate_sparsity: bool = True,
         # router
@@ -252,6 +255,7 @@ class BalmMoEConfig(PretrainedConfig):
         self.num_experts = int(num_experts)
         self.num_shared_experts = int(num_shared_experts)
         self.num_experts_per_tok = int(num_experts_per_tok)
+        self.top_p_threshold = float(top_p_threshold)
         self.num_initial_dense_layers = int(num_initial_dense_layers)
         self.alternate_sparsity = bool(alternate_sparsity)
         self.router_type = self._standardize_router_type(router_type)
@@ -384,7 +388,9 @@ class BalmMoEConfig(PretrainedConfig):
                 raise ValueError(
                     "All elements of expert_intermediate_size must be integers."
                 )
-            if (self.router_type == "expert-choice") and (len(set(expert_intermediate_size)) > 1):
+            if (self.router_type == "expert-choice") and (
+                len(set(expert_intermediate_size)) > 1
+            ):
                 raise ValueError(
                     "Heterogeneous expert sizes are not compatible with the expert choice router."
                 )

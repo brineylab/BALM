@@ -210,14 +210,17 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         cat_router_logits = torch.cat(router_logits, dim=0)
         cat_router_probs = torch.cat(router_probs, dim=0)
 
+        # determine k (default 1 unless top-k)
+        k = self.config.num_experts_per_tok if self.config.router_type == "top-k" else 1
+
         # router losses
         aux_loss, penalty_loss, z_loss = None, None, None
-        if self.config.router_type == "expert choice":
+        if self.config.router_type == "expert-choice":
             z_loss = router_z_loss(cat_router_logits)
         elif self.config.homogeneous_experts:
             aux_loss = router_load_balancing_loss(
                 router_probs=cat_router_probs,
-                k=self.config.num_experts_per_tok,
+                k=k,
                 attention_mask=(
                     attention_mask if self.config.router_mask_aux_loss else None
                 ),
@@ -227,13 +230,13 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
             if self.config.router_use_penalty_loss:
                 penalty_loss = router_p_penalty_loss(
                     router_probs=cat_router_probs,
-                    k=self.config.num_experts_per_tok,
+                    k=k,
                     expert_hidden_sizes=self.config.expert_intermediate_size,
                 )
             else:
                 aux_loss = router_load_balancing_loss(
                     router_probs=cat_router_probs,
-                    k=self.config.num_experts_per_tok,
+                    k=k,
                     attention_mask=(
                         attention_mask if self.config.router_mask_aux_loss else None
                     ),
@@ -407,7 +410,7 @@ class BalmMoEForMaskedLM(
 
             # router loss(es)
             aux_loss, penalty_loss, z_loss = None, None, None
-            if self.config.router_type == "expert choice":
+            if self.config.router_type == "expert-choice":
                 z_loss = self.router_z_loss_coef * (outputs.z_loss)
                 loss = lm_loss + z_loss
             elif self.config.homogeneous_experts:
@@ -630,7 +633,7 @@ class BalmMoEForSequenceClassification(
             # router loss(es)
             # if the base model is frozen (default), both router coeffs are zeroed out
             aux_loss, penalty_loss, z_loss = None, None, None
-            if self.config.router_type == "expert choice":
+            if self.config.router_type == "expert-choice":
                 z_loss = self.router_z_loss_coef * (outputs.z_loss)
                 loss = classifier_loss + z_loss
             elif self.config.homogeneous_experts:
