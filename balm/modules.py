@@ -18,7 +18,7 @@ __all__ = [
     # layers
     "DenseTransformerLayer",
     "SparseTransformerLayer",
-    "SparseFFN",
+    "BaseSparseFFN",
     "DenseFFN",
     "GluFFN",
     # heads
@@ -26,12 +26,6 @@ __all__ = [
     "BalmSequenceClassificationHead",
     "BalmAttentionSequenceClassificationHead",
 ]
-
-ROUTER_MAPPING = {
-    "top-k": TopKRouter,
-    "top-p": TopPRouter,
-    "expert-choice": ExpertChoiceRouter,
-}
 
 
 # =================================
@@ -316,7 +310,7 @@ class GluFFN(nn.Module):
         return x
 
 
-class SparseFFN(nn.Module):
+class BaseSparseFFN(nn.Module):
     """
     Sparse Mixture of Experts layer with capacity constraints.
 
@@ -360,10 +354,6 @@ class SparseFFN(nn.Module):
         num_shared_experts: int,
         expert_capacity_type: str,
         expert_capacity: Union[int, float],
-        k: int = 1,
-        router_type: str = "top-k",
-        router_bias: bool = False,
-        router_dtype: str = "float32",
         router_jitter: float = 0.0,
         expert_activation: str = "swiglu",
         expert_bias: bool = True,
@@ -371,17 +361,7 @@ class SparseFFN(nn.Module):
         super().__init__()
         self.num_experts = num_experts - num_shared_experts  # subtract shared experts
         self.num_shared_experts = num_shared_experts
-        self.k = k
         self.router_jitter = router_jitter
-
-        # router
-        router_class = ROUTER_MAPPING[router_type]
-        self.router = router_class(
-            d_model=model_dim,
-            num_experts=self.num_experts,
-            router_bias=router_bias,
-            router_dtype=router_dtype,
-        )
 
         # experts
         ffn_class = GluFFN if "glu" in expert_activation else DenseFFN
@@ -429,6 +409,324 @@ class SparseFFN(nn.Module):
         """
 
         return int(self.capacity_multiplier * num_tokens / self.num_experts)
+
+
+class TopKSparseFFN(BaseSparseFFN):
+    """
+    TopK sparse Mixture of Experts layer with capacity constraints.
+    """
+
+    def __init__(
+        self,
+        model_dim: int,
+        expert_ffn_dims: List,
+        shared_ffn_dim: int,
+        num_experts: int,
+        num_shared_experts: int,
+        expert_capacity_type: str,
+        expert_capacity: Union[int, float],
+        k: int = 1,
+        router_bias: bool = False,
+        router_dtype: str = "float32",
+        router_jitter: float = 0.0,
+        expert_activation: str = "swiglu",
+        expert_bias: bool = True,
+        **kwargs,
+    ):
+        super().__init__(
+            model_dim=model_dim,
+            expert_ffn_dims=expert_ffn_dims,
+            shared_ffn_dim=shared_ffn_dim,
+            num_experts=num_experts,
+            num_shared_experts=num_shared_experts,
+            expert_capacity_type=expert_capacity_type,
+            expert_capacity=expert_capacity,
+            router_jitter=router_jitter,
+            expert_activation=expert_activation,
+            expert_bias=expert_bias,
+        )
+        
+        # router
+        self.k = k
+        self.router = TopKRouter(
+            d_model=model_dim,
+            num_experts=self.num_experts,
+            router_bias=router_bias,
+            router_dtype=router_dtype,
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        padding_mask: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        """
+        Forward pass for the SparseFFN layer.
+
+        Parameters:
+        -----------
+        x : torch.Tensor
+            Input tensor of shape (batch_size, seq_len, model_dim).
+        padding_mask: Optional[torch.Tensor], default=None
+            Boolean mask indicating padded positions (batch_size, seq_len)
+
+        Returns:
+        --------
+        output : torch.Tensor
+            Output tensor of shape (batch_size, seq_len, model_dim).
+        router_tuple : Tuple[torch.Tensor, torch.Tensor]
+            A tuple containing the following:
+            - router_logits : torch.Tensor
+                Router logits of shape (batch_size, seq_len, num_experts).
+            - router_indices : torch.Tensor
+                Router indices of shape (batch_size, seq_len, num_experts).
+        """
+
+        batch_size, seq_len, d_model = x.shape
+        num_tokens = batch_size * seq_len
+
+        # add jitter if training, before reshaping logits
+        if self.training and self.router_jitter > 0:
+            x *= torch.empty_like(x).uniform_(
+                1.0 - self.router_jitter, 1.0 + self.router_jitter
+            )
+
+        # flatten logits
+        x_flat = x.view(-1, d_model)  # ==> (num_tokens, d_model)
+
+        # expert capacity
+        capacity = (
+            self._compute_multiplier_capacity(num_tokens)
+            if self.expert_capacity is None
+            else self.expert_capacity
+        )
+
+        # logits are shape (num_tokens, num_experts)
+        # probs and indices are shape (num_experts, expert_capacity)
+        router_logits, router_probs, topk_probs, topk_mask = self.router(
+            x_flat,
+            k=self.k,
+            expert_capacity=capacity,
+        )
+
+        # clone hidden states
+        # this passes hidden states unchanged for tokens that aren't sent to any expert
+        output = x_flat.clone()
+
+        # experts (excluding shared expert)
+        for expert_idx, expert in enumerate(self.experts):
+
+            # get token indices & probs
+            expert_mask = topk_mask[:, :, expert_idx]  # (num_tokens, k)
+            token_indices, k_indices = torch.nonzero(expert_mask, as_tuple=True)
+            routing_probs = topk_probs[token_indices, k_indices]
+
+            # no valid tokens for this expert
+            if token_indices.numel() == 0:
+                continue
+
+            # get expert input
+            expert_input = x_flat[token_indices]
+
+            # compute expert output
+            # scale output by routing probability
+            expert_output = expert(expert_input) * routing_probs.unsqueeze(1)
+
+            # accumulate expert output
+            output[token_indices] += expert_output
+
+        # shared expert(s)
+        for expert_idx, expert in enumerate(self.shared_experts):
+
+            # compute expert output for all tokens
+            # no scaling by routing probability
+            shared_output = expert(x_flat)
+
+            # accumulate expert output
+            output += shared_output
+
+        output = output.view(batch_size, seq_len, d_model)
+        return output, (router_logits, router_probs, topk_probs, topk_mask)
+
+
+class TopPSparseFFN(BaseSparseFFN):
+    """
+    TopP sparse Mixture of Experts layer with capacity constraints.
+    """
+
+    def __init__(
+        self,
+        model_dim: int,
+        expert_ffn_dims: List,
+        shared_ffn_dim: int,
+        num_experts: int,
+        num_shared_experts: int,
+        expert_capacity_type: str,
+        expert_capacity: Union[int, float],
+        router_bias: bool = False,
+        router_dtype: str = "float32",
+        router_jitter: float = 0.0,
+        expert_activation: str = "swiglu",
+        expert_bias: bool = True,
+        top_p_threshold: float = 0.5,
+        **kwargs,
+    ):
+        super().__init__(
+            model_dim=model_dim,
+            expert_ffn_dims=expert_ffn_dims,
+            shared_ffn_dim=shared_ffn_dim,
+            num_experts=num_experts,
+            num_shared_experts=num_shared_experts,
+            expert_capacity_type=expert_capacity_type,
+            expert_capacity=expert_capacity,
+            router_jitter=router_jitter,
+            expert_activation=expert_activation,
+            expert_bias=expert_bias,
+        )
+        
+        # router
+        self.router = TopPRouter(
+            d_model=model_dim,
+            num_experts=self.num_experts,
+            router_bias=router_bias,
+            router_dtype=router_dtype,
+            top_p_threshold=top_p_threshold,
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        padding_mask: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        """
+        Forward pass for the SparseFFN layer.
+
+        Parameters:
+        -----------
+        x : torch.Tensor
+            Input tensor of shape (batch_size, seq_len, model_dim).
+        padding_mask: Optional[torch.Tensor], default=None
+            Boolean mask indicating padded positions (batch_size, seq_len)
+
+        Returns:
+        --------
+        output : torch.Tensor
+            Output tensor of shape (batch_size, seq_len, model_dim).
+        router_tuple : Tuple[torch.Tensor, torch.Tensor]
+            A tuple containing the following:
+            - router_logits : torch.Tensor
+                Router logits of shape (batch_size, seq_len, num_experts).
+            - router_indices : torch.Tensor
+                Router indices of shape (batch_size, seq_len, num_experts).
+        """
+
+        batch_size, seq_len, d_model = x.shape
+        num_tokens = batch_size * seq_len
+
+        # add jitter if training, before reshaping logits
+        if self.training and self.router_jitter > 0:
+            x *= torch.empty_like(x).uniform_(
+                1.0 - self.router_jitter, 1.0 + self.router_jitter
+            )
+
+        # flatten logits
+        x_flat = x.view(-1, d_model)  # ==> (num_tokens, d_model)
+
+        # expert capacity
+        capacity = (
+            self._compute_multiplier_capacity(num_tokens)
+            if self.expert_capacity is None
+            else self.expert_capacity
+        )
+
+        # logits are shape (num_tokens, num_experts)
+        # probs and indices are shape (num_experts, expert_capacity)
+        router_logits, router_probs, topp_probs, topp_mask = self.router(
+            x_flat,
+            expert_capacity=capacity,
+        )
+
+        # clone hidden states
+        # this passes hidden states unchanged for tokens that aren't sent to any expert
+        output = x_flat.clone()
+
+        # experts (excluding shared expert)
+        for expert_idx, expert in enumerate(self.experts):
+
+            # get token indices & probs
+            expert_mask = topk_mask[:, :, expert_idx]  # (num_tokens, k)
+            token_indices, k_indices = torch.nonzero(expert_mask, as_tuple=True)
+            routing_probs = topk_probs[token_indices, k_indices]
+
+            # no valid tokens for this expert
+            if token_indices.numel() == 0:
+                continue
+
+            # get expert input
+            expert_input = x_flat[token_indices]
+
+            # compute expert output
+            # scale output by routing probability
+            expert_output = expert(expert_input) * routing_probs.unsqueeze(1)
+
+            # accumulate expert output
+            output[token_indices] += expert_output
+
+        # shared expert(s)
+        for expert_idx, expert in enumerate(self.shared_experts):
+
+            # compute expert output for all tokens
+            # no scaling by routing probability
+            shared_output = expert(x_flat)
+
+            # accumulate expert output
+            output += shared_output
+
+        output = output.view(batch_size, seq_len, d_model)
+        return output, (router_logits, router_probs, topk_probs, topk_mask)
+
+
+class ExpertChoiceSparseFFN(BaseSparseFFN):
+    """
+    Expert Choice Sparse Mixture of Experts layer with capacity constraints.
+    """
+
+    def __init__(
+        self,
+        model_dim: int,
+        expert_ffn_dims: List,
+        shared_ffn_dim: int,
+        num_experts: int,
+        num_shared_experts: int,
+        expert_capacity_type: str,
+        expert_capacity: Union[int, float],
+        router_bias: bool = False,
+        router_dtype: str = "float32",
+        router_jitter: float = 0.0,
+        expert_activation: str = "swiglu",
+        expert_bias: bool = True,
+        **kwargs,
+    ):
+        super().__init__(
+            model_dim=model_dim,
+            expert_ffn_dims=expert_ffn_dims,
+            shared_ffn_dim=shared_ffn_dim,
+            num_experts=num_experts,
+            num_shared_experts=num_shared_experts,
+            expert_capacity_type=expert_capacity_type,
+            expert_capacity=expert_capacity,
+            router_jitter=router_jitter,
+            expert_activation=expert_activation,
+            expert_bias=expert_bias,
+        )
+
+        # router
+        self.router = ExpertChoiceRouter(
+            d_model=model_dim,
+            num_experts=self.num_experts,
+            router_bias=router_bias,
+            router_dtype=router_dtype,
+        )
 
     def forward(
         self,
@@ -758,6 +1056,13 @@ class DenseTransformerLayer(nn.Module):
         return (x, attn_vals) if need_weights else x
 
 
+SPARSE_FFN_MAPPING = {
+    "top-k": TopKSparseFFN,
+    "top-p": TopPSparseFFN,
+    "expert-choice": ExpertChoiceSparseFFN,
+}
+
+
 class SparseTransformerLayer(nn.Module):
     """
     Sparse Transformer layer.
@@ -787,7 +1092,8 @@ class SparseTransformerLayer(nn.Module):
         self.ffn_layer_norm = nn.LayerNorm(
             config.hidden_size, eps=config.layer_norm_eps
         )
-        self.sparse_ffn = SparseFFN(
+        sparse_ffn = SPARSE_FFN_MAPPING[config.router_type]
+        self.sparse_ffn = sparse_ffn(
             model_dim=config.hidden_size,
             expert_ffn_dims=config.expert_intermediate_size,
             shared_ffn_dim=config.shared_expert_intermediate_size,
@@ -798,7 +1104,6 @@ class SparseTransformerLayer(nn.Module):
             expert_capacity_type=config.expert_capacity_type,
             expert_capacity=config.expert_capacity,
             k=config.num_experts_per_tok,
-            router_type=config.router_type,
             router_bias=config.router_bias,
             router_dtype=config.router_dtype,
             router_jitter=config.router_jitter,

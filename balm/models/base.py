@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 from transformers import PreTrainedModel
 
-from ..modules import SparseFFN
+from ..modules import BaseSparseFFN
 
 WEIGHTS_NAME = "model.pt"
 SAFE_WEIGHTS_NAME = "model.safetensors"
@@ -135,7 +135,7 @@ class ParameterCountMixin:
         if only_active:
             # locate MoE layers
             moe_layers = [
-                module for module in self.modules() if isinstance(module, SparseFFN)
+                module for module in self.modules() if isinstance(module, BaseSparseFFN)
             ]
             if not moe_layers:
                 raise ValueError("No MoE layers were found.")

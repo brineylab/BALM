@@ -40,7 +40,7 @@ def router_z_loss(router_logits: torch.Tensor) -> torch.Tensor:
 
 def router_load_balancing_loss(
     router_probs: torch.Tensor,
-    k: int,
+    router_ids: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
@@ -59,8 +59,8 @@ def router_load_balancing_loss(
 
     Parameters
     ----------
-    router_probs : torch.Tensor
-        Concatenated router probs for all sparse layers. Shape is [num_tokens, num_experts],
+    router_ids : torch.Tensor
+        Concatenated router probs for all sparse layers. Shape is [num_tokens, k, num_experts],
         where num_tokens is (batch_size * seq_len * num_sparse_layers)
     k: int
         Number of experts each token is routed to (for topK routing).
@@ -81,19 +81,13 @@ def router_load_balancing_loss(
         https://github.com/huggingface/transformers/blob/main/src/transformers/models/mixtral/modeling_mixtral.py#L851
     """
 
-    num_tokens, num_experts = router_probs.shape
-    device = router_probs.device
-
-    # apply top-k across probs for all layers ==> (num_tokens, k)
-    _, selected_experts = torch.topk(router_probs, k, dim=-1)
-
-    # generate expert mask ==> (num_tokens, k, num_experts)
-    expert_mask = torch.nn.functional.one_hot(selected_experts, num_experts)
+    num_tokens, k, num_experts = router_ids.shape
+    device = router_ids.device
 
     # factor attention_mask
     if attention_mask is None:
         # Compute the percentage of tokens routed to each experts ==> (k, num_experts)
-        tokens_per_expert = torch.mean(expert_mask.float(), dim=0)
+        tokens_per_expert = torch.mean(router_ids.float(), dim=0)
 
         # Compute the average probability of routing to these experts ==> (num_experts)
         router_prob_per_expert = torch.mean(router_probs, dim=0)
@@ -101,7 +95,7 @@ def router_load_balancing_loss(
         batch_size, sequence_length = attention_mask.shape
         num_hidden_layers = num_tokens // (batch_size * sequence_length)
 
-        # Compute the mask that masks all padding tokens as 0 with the same shape of expert_mask
+        # Compute the mask that masks all padding tokens as 0 with the same shape of router_ids
         expert_attention_mask = (
             attention_mask[None, :, :, None, None]
             .expand((num_hidden_layers, batch_size, sequence_length, k, num_experts))
@@ -111,7 +105,7 @@ def router_load_balancing_loss(
 
         # Compute the percentage of tokens routed to each experts
         tokens_per_expert = torch.sum(
-            expert_mask.float() * expert_attention_mask, dim=0
+            router_ids.float() * expert_attention_mask, dim=0
         ) / torch.sum(expert_attention_mask, dim=0)
 
         # Compute the mask that masks all padding tokens as 0 with the same shape of tokens_per_expert

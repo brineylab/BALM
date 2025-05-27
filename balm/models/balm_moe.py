@@ -209,6 +209,7 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         # concat logits & probs for router losses
         cat_router_logits = torch.cat(router_logits, dim=0)
         cat_router_probs = torch.cat(router_probs, dim=0)
+        cat_expert_idxs = torch.cat(expert_idxs, dim=0)
 
         # router losses
         aux_loss, penalty_loss, z_loss = None, None, None
@@ -217,7 +218,8 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         elif self.config.homogeneous_experts:
             aux_loss = router_load_balancing_loss(
                 router_probs=cat_router_probs,
-                k=self.config.num_experts_per_tok,
+                router_ids=cat_expert_idxs,
+                # k=self.config.num_experts_per_tok,
                 attention_mask=(
                     attention_mask if self.config.router_mask_aux_loss else None
                 ),
@@ -233,7 +235,8 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
             else:
                 aux_loss = router_load_balancing_loss(
                     router_probs=cat_router_probs,
-                    k=self.config.num_experts_per_tok,
+                    router_ids=cat_expert_idxs,
+                    # k=self.config.num_experts_per_tok,
                     attention_mask=(
                         attention_mask if self.config.router_mask_aux_loss else None
                     ),
