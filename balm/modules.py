@@ -2,7 +2,6 @@
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
-from functools import partial
 from typing import Optional, Tuple, Union, List
 
 import torch

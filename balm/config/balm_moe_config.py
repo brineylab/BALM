@@ -4,7 +4,6 @@
 
 from typing import Optional, Union, List
 
-import torch
 from transformers import PretrainedConfig
 
 
