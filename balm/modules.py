@@ -2,7 +2,6 @@
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
-from functools import partial
 from typing import Optional, Tuple, Union, List
 
 import torch
@@ -11,7 +10,7 @@ import torch.nn.functional as F
 
 from .activation import get_activation_fn
 from .embedding import RotaryPositionalEmbedding
-from .router import ExpertChoiceRouter, TopKRouter
+from .router import ExpertChoiceRouter, TopKRouter, TopPRouter
 from transformers import PretrainedConfig
 
 __all__ = [
@@ -26,6 +25,12 @@ __all__ = [
     "BalmSequenceClassificationHead",
     "BalmAttentionSequenceClassificationHead",
 ]
+
+ROUTER_MAPPING = {
+    "top-k": TopKRouter,
+    "top-p": TopPRouter,
+    "expert-choice": ExpertChoiceRouter,
+}
 
 
 # =================================
@@ -330,9 +335,9 @@ class SparseFFN(nn.Module):
     expert_capacity: Union[int, float]
         Expert capacity, either absolute or multiplier based on expert_capacity_type
     k: int, default=1
-        Number of experts per token. Used in "topk" routing only.
-    router_type: str, default="topk"
-        Router type. Options are "topk" or "expert choice".
+        Number of experts per token. Used in "top-k" routing only.
+    router_type: str, default="top-k"
+        Router type. Options are "top-k", "top-p", or "expert-choice".
     router_bias: bool, default=False
         Whether to use bias in the router.
     router_dtype: torch.dtype
@@ -354,8 +359,9 @@ class SparseFFN(nn.Module):
         num_shared_experts: int,
         expert_capacity_type: str,
         expert_capacity: Union[int, float],
-        k: int = 1,
-        router_type: str = "topk",
+        k: int,
+        top_p_threshold: float,
+        router_type: str = "top-k",
         router_bias: bool = False,
         router_dtype: str = "float32",
         router_jitter: float = 0.0,
@@ -365,38 +371,43 @@ class SparseFFN(nn.Module):
         super().__init__()
         self.num_experts = num_experts - num_shared_experts  # subtract shared experts
         self.num_shared_experts = num_shared_experts
-        self.k = k
         self.router_jitter = router_jitter
 
         # router
-        router_class = TopKRouter if router_type == "topk" else ExpertChoiceRouter
+        router_class = ROUTER_MAPPING[router_type]
         self.router = router_class(
             d_model=model_dim,
             num_experts=self.num_experts,
             router_bias=router_bias,
             router_dtype=router_dtype,
+            k=k,
+            top_p_threshold=top_p_threshold,
         )
 
         # experts
         ffn_class = GluFFN if "glu" in expert_activation else DenseFFN
-        self.experts = nn.ModuleList([
-            ffn_class(
-                model_dim=model_dim,
-                ffn_dim=ffn_dim,
-                bias=expert_bias,
-                activation=expert_activation,
-            )
-            for ffn_dim in expert_ffn_dims
-        ])  # excluding shared expert(s)
-        self.shared_experts = nn.ModuleList([
-            ffn_class(
-                model_dim=model_dim,
-                ffn_dim=shared_ffn_dim,
-                bias=expert_bias,
-                activation=expert_activation,
-            )
-            for _ in range(self.num_shared_experts)
-        ])
+        self.experts = nn.ModuleList(
+            [
+                ffn_class(
+                    model_dim=model_dim,
+                    ffn_dim=ffn_dim,
+                    bias=expert_bias,
+                    activation=expert_activation,
+                )
+                for ffn_dim in expert_ffn_dims
+            ]
+        )  # excluding shared expert(s)
+        self.shared_experts = nn.ModuleList(
+            [
+                ffn_class(
+                    model_dim=model_dim,
+                    ffn_dim=shared_ffn_dim,
+                    bias=expert_bias,
+                    activation=expert_activation,
+                )
+                for _ in range(self.num_shared_experts)
+            ]
+        )
 
         # expert capacity (applied to non-shared experts)
         if expert_capacity < 0:
@@ -427,7 +438,6 @@ class SparseFFN(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        padding_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Forward pass for the SparseFFN layer.
@@ -474,7 +484,6 @@ class SparseFFN(nn.Module):
         # probs and indices are shape (num_experts, expert_capacity)
         router_logits, router_probs, expert_probs, expert_indices = self.router(
             x_flat,
-            k=self.k,
             expert_capacity=capacity,
         )
 
@@ -792,6 +801,7 @@ class SparseTransformerLayer(nn.Module):
             expert_capacity_type=config.expert_capacity_type,
             expert_capacity=config.expert_capacity,
             k=config.num_experts_per_tok,
+            top_p_threshold=config.top_p_threshold,
             router_type=config.router_type,
             router_bias=config.router_bias,
             router_dtype=config.router_dtype,
@@ -848,7 +858,7 @@ class SparseTransformerLayer(nn.Module):
         # sparse FFN
         residual = x
         x = self.ffn_layer_norm(x)
-        ffn_out, router_tuple = self.sparse_ffn(x, padding_mask=padding_mask)
+        ffn_out, router_tuple = self.sparse_ffn(x)
         x = residual + self.ffn_dropout(ffn_out)
 
         return (x, attn_vals, router_tuple) if need_weights else (x, router_tuple)

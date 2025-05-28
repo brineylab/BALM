@@ -2,16 +2,13 @@
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
-import json
-import os
-import re
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Optional
 
-import torch
 import torch.nn as nn
 from transformers import PreTrainedModel
 
 from ..modules import SparseFFN
+from ..loss import ROUTER_LOSSES
 
 WEIGHTS_NAME = "model.pt"
 SAFE_WEIGHTS_NAME = "model.safetensors"
@@ -27,6 +24,19 @@ class BalmPreTrainedModel(PreTrainedModel):
     """
 
     supports_gradient_checkpointing = True
+
+    def __init__(self, config, *args, **kwargs):
+        super().__init__(config, *args, **kwargs)
+
+        # router loss coefficients
+        # extract values as a dict, so that we can zero them out in freeze_base_model()
+        # and access them when calculating the loss
+        if self.base_model_prefix == "balm_moe":
+            self.router_loss_coeffs = {
+                k: getattr(config, f"router_{k}_coef")
+                for k in ROUTER_LOSSES
+                if hasattr(config, f"router_{k}_coef")
+            }
 
     # Copied from transformers.models.bert.modeling_bert.BertPreTrainedModel._init_weights
     def _init_weights(self, module):
@@ -71,12 +81,9 @@ class FreezeBaseModelMixin:
             param.requires_grad = False
 
         # zero out router loss coefficients (MoE models only)
-        if hasattr(self, "router_z_loss_coef"):
-            self.router_z_loss_coef = 0.0
-        if hasattr(self, "router_aux_loss_coef"):
-            self.router_aux_loss_coef = 0.0
-        if hasattr(self, "router_penalty_loss_coef"):
-            self.router_penalty_loss_coef = 0.0
+        if hasattr(self, "router_loss_coeffs"):
+            for k in self.router_loss_coeffs:
+                self.router_loss_coeffs[k] = 0.0
 
 
 class ParameterCountMixin:
@@ -187,9 +194,7 @@ class ParameterCountMixin:
                     total_num_params += shared_expert_params
 
                 # experts (partially active)
-                total_expert_params = sum(
-                    p.numel() for p in moe.experts.parameters()
-                )
+                total_expert_params = sum(p.numel() for p in moe.experts.parameters())
                 active_expert_params = total_expert_params * prop_tokens_per_expert
                 total_num_params += active_expert_params
         # count all parameters

@@ -4,7 +4,6 @@
 
 from typing import Optional, Union, List
 
-import torch
 from transformers import PretrainedConfig
 
 
@@ -57,14 +56,16 @@ class BalmMoEConfig(PretrainedConfig):
     num_shared_experts: int, default=0
         The number of shared experts (which receive all tokens) in the model.
     num_experts_per_tok : int, default=1
-        The number of experts to route each token to. Only used if `router_type` is "topk".
+        The number of experts to route each token to. Only used if `router_type` is "top-k".
+    top_p_threshold: float, default=0.5
+        The probability threshold for "top-p" routing. Only used if `router_type` is "top-p".
     num_initial_dense_layers: int, default=1
         The number of dense layers at the start of the model before any sparse layers.
     alternate_sparsity : bool, default=True
         Whether to use alternate sparse and dense layers.
-    router_type : str, default="topk"
+    router_type : str, default="top-k"
         The type of router to use.
-        Options are "topk" or "expert choice".
+        Options are "top-k", "top-p", or "expert-choice".
     router_dtype : str, default="float32"
         Data type of the router tensors, that is converted to torch.dtype.
         Options are "float32", "float16", or "bfloat16".
@@ -79,7 +80,9 @@ class BalmMoEConfig(PretrainedConfig):
     use_p_penalty_loss: bool, default=False
         Whether or not to use p-penalty loss instead of standard aux loss.
     router_penalty_loss_coef: float, default=0.01
-        The coefficient for the p-penalty loss.
+        The coefficient for the p-penalty loss for heterogeneous sized experts.
+    router_dynamic_loss_coef: float, default=0.0001
+        The coeeficient for the dynamic loss for top-p models.
     expert_capacity_type: str, default="multiplier"
         The type of expert capacity to use.
         If "absolute": tokens per expert; if "multiplier": capacity = multiplier * max_position_embeddings
@@ -88,7 +91,7 @@ class BalmMoEConfig(PretrainedConfig):
         If `expert_capacity_type` is "absolute", this value is translated as the actual token capacity of each expert.
         If `expert_capacity_type` is "multiplier", this value is translated as the multiplier with which the total
         expert capacity is calculated (i.e. each expert capacity = multiplier * max_position_embeddings / num_experts).
-        If capacity is less than 0, no expert capacity is set. This is only compatible with TopK routing.
+        If capacity is less than 0, no expert capacity is set. This is only compatible with Top-K routing.
     expert_intermediate_size: Union[int, List], default=None
         The intermediate size of the experts.
         If provided as an int, all experts will have the same size (homogeneous).
@@ -185,10 +188,11 @@ class BalmMoEConfig(PretrainedConfig):
         num_experts: int = 8,
         num_shared_experts: int = 0,
         num_experts_per_tok: int = 1,  # k for top-k routing (to comply with 🤗 naming)
+        top_p_threshold: float = 0.5,
         num_initial_dense_layers: int = 1,
         alternate_sparsity: bool = True,
         # router
-        router_type: str = "topk",
+        router_type: str = "top-k",
         router_dtype: str = "float32",
         router_jitter: float = 0.0,
         router_bias: bool = False,
@@ -198,6 +202,7 @@ class BalmMoEConfig(PretrainedConfig):
         router_z_loss_coef: float = 0.001,
         router_use_penalty_loss: bool = False,
         router_penalty_loss_coef: float = 0.1,
+        router_dynamic_loss_coef: float = 0.0001,
         # experts
         expert_capacity_type: str = "multiplier",
         expert_capacity: int = 1,
@@ -252,6 +257,7 @@ class BalmMoEConfig(PretrainedConfig):
         self.num_experts = int(num_experts)
         self.num_shared_experts = int(num_shared_experts)
         self.num_experts_per_tok = int(num_experts_per_tok)
+        self.top_p_threshold = float(top_p_threshold)
         self.num_initial_dense_layers = int(num_initial_dense_layers)
         self.alternate_sparsity = bool(alternate_sparsity)
         self.router_type = self._standardize_router_type(router_type)
@@ -263,6 +269,7 @@ class BalmMoEConfig(PretrainedConfig):
         self.router_z_loss_coef = float(router_z_loss_coef)
         self.router_use_penalty_loss = bool(router_use_penalty_loss)
         self.router_penalty_loss_coef = float(router_penalty_loss_coef)
+        self.router_dynamic_loss_coef = float(router_dynamic_loss_coef)
         self.expert_capacity_type = expert_capacity_type.lower()
         self.expert_capacity = expert_capacity
         self.expert_intermediate_size = self._get_expert_sizes(
@@ -314,7 +321,7 @@ class BalmMoEConfig(PretrainedConfig):
             raise ValueError(
                 f"Invalid expert capacity type: {self.expert_capacity_type}. Options are 'absolute' or 'multiplier'."
             )
-        if self.expert_capacity <= 0 and self.router_type == "expert choice":
+        if self.expert_capacity <= 0 and self.router_type == "expert-choice":
             raise ValueError(
                 f"Invalid expert capacity: {str(self.expert_capacity)}. Expert capacity must be a positive integer for the Expert Choice router."
             )
@@ -349,12 +356,14 @@ class BalmMoEConfig(PretrainedConfig):
 
     def _standardize_router_type(self, router_type: str) -> str:
         if router_type.lower() in ["topk", "top-k", "top_k"]:
-            return "topk"
+            return "top-k"
+        elif router_type.lower() in ["topp", "top-p", "top_p"]:
+            return "top-p"
         elif router_type.lower() in ["expert choice", "expert-choice", "expert_choice"]:
-            return "expert choice"
+            return "expert-choice"
         else:
             raise ValueError(
-                f"Invalid router type: {router_type}. Options are 'topk' or 'expert choice'."
+                f"Invalid router type: {router_type}. Options are 'top-k', 'top-p', or 'expert-choice'."
             )
 
     def _get_expert_sizes(
@@ -382,7 +391,9 @@ class BalmMoEConfig(PretrainedConfig):
                 raise ValueError(
                     "All elements of expert_intermediate_size must be integers."
                 )
-            if self.router_type == "expert choice":
+            if (self.router_type == "expert-choice") and (
+                len(set(expert_intermediate_size)) > 1
+            ):
                 raise ValueError(
                     "Heterogeneous expert sizes are not compatible with the expert choice router."
                 )
