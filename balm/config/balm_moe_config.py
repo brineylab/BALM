@@ -79,7 +79,7 @@ class BalmMoEConfig(PretrainedConfig):
         The coefficient for the z-loss.
     use_p_penalty_loss: bool, default=False
         Whether or not to use p-penalty loss instead of standard aux loss.
-    router_penalty_loss_coef: float, default=0.01
+    router_penalty_loss_coef: float, default=0.1
         The coefficient for the p-penalty loss for heterogeneous sized experts.
     router_dynamic_loss_coef: float, default=0.0001
         The coeeficient for the dynamic loss for top-p models.
