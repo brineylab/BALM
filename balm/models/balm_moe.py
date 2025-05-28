@@ -82,7 +82,7 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
 
         # determine k (default to 1 for top-p)
         k = self.config.num_experts_per_tok if self.config.router_type == "top-k" else 1
-        
+
         # empty output dict
         losses = {}
 
@@ -324,14 +324,6 @@ class BalmMoEForMaskedLM(
         # loss function
         self.criterion = nn.CrossEntropyLoss(ignore_index=-100)
 
-        # router loss coefficients
-        # set as attributes (rather than using the config values directly)
-        # so that we can zero them out in freeze_base_model() if necessary
-        self.router_z_loss_coef = config.router_z_loss_coef
-        self.router_aux_loss_coef = config.router_aux_loss_coef
-        self.router_penalty_loss_coef = self.config.router_penalty_loss_coef
-        self.router_dynamic_loss_coef = self.config.router_dynamic_loss_coef
-
         # initialize weights
         self.init_weights()
 
@@ -431,19 +423,17 @@ class BalmMoEForMaskedLM(
         if labels is not None:
             # lm loss
             labels = labels.to(lm_logits.device)
-            lm_loss = self.criterion(
+            moe_losses["lm_loss"] = self.criterion(
                 lm_logits.view(-1, self.config.vocab_size), labels.view(-1)
             )
-            moe_losses['lm_loss'] = lm_loss
 
-            # weighted sum of losses
-            loss = (
-                lm_loss
-                + self.router_z_loss_coef * moe_losses.get("z_loss", 0.0)
-                + self.router_aux_loss_coef * moe_losses.get("aux_loss", 0.0)
-                + self.router_penalty_loss_coef * moe_losses.get("penalty_loss", 0.0)
-                + self.router_dynamic_loss_coef * moe_losses.get("dynamic_loss", 0.0)
-            )
+            # apply coeffs
+            for k, coef in self.router_loss_coeffs.items():
+                if k in moe_losses:
+                    moe_losses[k] = coef * moe_losses[k]
+
+            # sum
+            loss = sum(moe_losses.values())
 
         # outputs
         if not return_dict:
@@ -508,14 +498,6 @@ class BalmMoEForSequenceClassification(
 
         # loss function
         self.criterion = nn.CrossEntropyLoss()
-
-        # router loss coefficients
-        # set as attributes (rather than using the config values directly)
-        # so that we can zero them out in freeze_base_model() if necessary
-        self.router_z_loss_coef = self.config.router_z_loss_coef
-        self.router_aux_loss_coef = self.config.router_aux_loss_coef
-        self.router_penalty_loss_coef = self.config.router_penalty_loss_coef
-        self.router_dynamic_loss_coef = self.config.router_dynamic_loss_coef
 
         # initialize weights
         self.init_weights()
@@ -639,20 +621,18 @@ class BalmMoEForSequenceClassification(
         moe_losses = outputs.moe_losses if outputs.moe_losses else {}
         if labels is not None:
             labels = labels.to(classifier_logits.device)
-            classifier_loss = self.criterion(
+            moe_losses["classifier_loss"] = self.criterion(
                 classifier_logits.view(-1, self.config.num_labels),
                 labels.view(-1),
             )
-            moe_losses["classifier_loss"] = classifier_loss
 
-            # weighted sum of losses
-            loss = (
-                classifier_loss
-                + self.router_z_loss_coef * moe_losses.get("z_loss", 0.0)
-                + self.router_aux_loss_coef * moe_losses.get("aux_loss", 0.0)
-                + self.router_penalty_loss_coef * moe_losses.get("penalty_loss", 0.0)
-                + self.router_dynamic_loss_coef * moe_losses.get("dynamic_loss", 0.0)
-            )
+            # apply coeffs
+            for k, coef in self.router_loss_coeffs.items():
+                if k in moe_losses:
+                    moe_losses[k] = coef * moe_losses[k]
+
+            # sum
+            loss = sum(moe_losses.values())
 
         # outputs
         if not return_dict:

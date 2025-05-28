@@ -7,10 +7,18 @@ from typing import Optional, List
 import torch
 
 __all__ = [
+    "ROUTER_LOSSES",
     "router_z_loss",
     "router_load_balancing_loss",
     "router_p_penalty_loss",
     "router_dynamic_loss",
+]
+
+ROUTER_LOSSES = [
+    "z_loss",
+    "aux_loss",
+    "penalty_loss",
+    "dynamic_loss",
 ]
 
 
