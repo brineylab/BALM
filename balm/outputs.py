@@ -4,7 +4,7 @@
 
 
 from dataclasses import dataclass
-from typing import Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import torch
 from transformers.utils.generic import ModelOutput
@@ -127,10 +127,9 @@ class MoEModelOutput(BalmModelOutput):
         The router logits tensor. The shape is (batch_size, sequence_length, num_experts).
     expert_indexes : Optional[Tuple[torch.LongTensor]]
         The expert indexes tensor. The shape is (batch_size, sequence_length, num_experts).
-    z_loss : torch.FloatTensor
-        The z loss tensor. The shape is (1,).
-    aux_loss : torch.FloatTensor
-        The auxiliary loss tensor. The shape is (1,).
+    moe_losses : Optional[Dict[torch.FloatTensor]]
+        A dict containing the MoE losses. Can include any of the following losses:
+        aux_loss, penalty_loss, z_loss, dynamic_loss
     """
 
     last_hidden_state: torch.FloatTensor = None
@@ -138,9 +137,7 @@ class MoEModelOutput(BalmModelOutput):
     attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
     router_logits: Optional[Tuple[torch.FloatTensor]] = None
     expert_indexes: Optional[Tuple[torch.LongTensor]] = None
-    z_loss: torch.FloatTensor = None
-    aux_loss: torch.FloatTensor = None
-    penalty_loss: torch.FloatTensor = None
+    moe_losses: Optional[Dict[str, torch.FloatTensor]] = None
 
 
 @dataclass
@@ -162,12 +159,9 @@ class MoEMaskedLMOutput(BalmModelOutput):
         The router logits tensor. The shape is (batch_size, sequence_length, num_experts).
     expert_indexes : Optional[Tuple[torch.LongTensor]]
         The expert indexes tensor. The shape is (batch_size, sequence_length, num_experts).
-    z_loss : torch.FloatTensor
-        The z loss tensor. The shape is (1,).
-    aux_loss : torch.FloatTensor
-        The auxiliary loss tensor. The shape is (1,).
-    lm_loss : torch.FloatTensor
-        The masked language model loss tensor. The shape is (1,).
+    moe_losses : Optional[Dict[torch.FloatTensor]]
+        A dict containing the MoE losses. Can include any of the following losses:
+        lm_loss, aux_loss, penalty_loss, z_loss, dynamic_loss
     """
 
     loss: Optional[torch.FloatTensor] = None
@@ -176,10 +170,7 @@ class MoEMaskedLMOutput(BalmModelOutput):
     attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
     router_logits: Optional[Tuple[torch.FloatTensor]] = None
     expert_indexes: Optional[Tuple[torch.LongTensor]] = None
-    z_loss: torch.FloatTensor = None
-    aux_loss: torch.FloatTensor = None
-    penalty_loss: torch.FloatTensor = None
-    lm_loss: torch.FloatTensor = None
+    moe_losses: Optional[Dict[str, torch.FloatTensor]] = None
 
 
 @dataclass
@@ -203,12 +194,9 @@ class MoESequenceClassifierOutput(BalmModelOutput):
         The expert indexes tensor. The shape is (batch_size, sequence_length, num_experts).
     classifier_attentions : Optional[Tuple[torch.FloatTensor, ...]]
         The classifier attention weights tensor. The shape is (batch_size, num_heads, sequence_length, sequence_length).
-    z_loss : torch.FloatTensor
-        The z loss tensor. The shape is (1,).
-    aux_loss : torch.FloatTensor
-        The auxiliary loss tensor. The shape is (1,).
-    classifier_loss : torch.FloatTensor
-        The classifier loss tensor. The shape is (1,).
+    moe_losses : Optional[Dict[torch.FloatTensor]]
+        A dict containing the MoE losses. Can include any of the following losses:
+        classifier_loss, aux_loss, penalty_loss, z_loss, dynamic_loss
     """
 
     loss: Optional[torch.FloatTensor] = None
@@ -218,7 +206,4 @@ class MoESequenceClassifierOutput(BalmModelOutput):
     router_logits: Optional[Tuple[torch.FloatTensor]] = None
     expert_indexes: Optional[Tuple[torch.LongTensor]] = None
     classifier_attentions: Optional[torch.FloatTensor] = None
-    z_loss: torch.FloatTensor = None
-    aux_loss: torch.FloatTensor = None
-    penalty_loss: torch.FloatTensor = None
-    classifier_loss: torch.FloatTensor = None
+    moe_losses: Optional[Dict[str, torch.FloatTensor]] = None

@@ -6,7 +6,12 @@ from typing import Optional, List
 
 import torch
 
-__all__ = ["router_z_loss", "router_load_balancing_loss", "router_p_penalty_loss"]
+__all__ = [
+    "router_z_loss",
+    "router_load_balancing_loss",
+    "router_p_penalty_loss",
+    "router_dynamic_loss",
+]
 
 
 def router_z_loss(router_logits: torch.Tensor) -> torch.Tensor:
@@ -136,7 +141,8 @@ def router_p_penalty_loss(
     router_probs: torch.Tensor, k: int, expert_hidden_sizes: List
 ) -> torch.Tensor:
     """
-    Computes the parameter penalty (P-Penalty) loss.
+    Computes the parameter penalty (P-Penalty) loss for heterogeneous
+    size experts
 
     See the `HMoE paper`_ for more details.
 
@@ -211,9 +217,5 @@ def router_dynamic_loss(
     .. _Dynamic Routing paper:
         https://arxiv.org/abs/2403.07652
     """
-
     loss = -torch.sum(router_probs * torch.log(router_probs), dim=-1)
-    print(loss)
-    raise Exception()
-
     return loss.mean()

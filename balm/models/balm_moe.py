@@ -8,7 +8,12 @@ import torch
 import torch.nn as nn
 
 from ..config import BalmMoEConfig
-from ..loss import router_load_balancing_loss, router_p_penalty_loss, router_z_loss
+from ..loss import (
+    router_load_balancing_loss,
+    router_p_penalty_loss,
+    router_z_loss,
+    router_dynamic_loss,
+)
 from ..modules import (
     BalmLMHead,
     BalmSequenceClassificationHead,
@@ -72,6 +77,38 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
 
         # initialize weights and apply final processing
         self.post_init()
+
+    def _get_balancing_loss(self, cat_router_probs, attention_mask):
+
+        # determine k (default to 1 for top-p)
+        k = self.config.num_experts_per_tok if self.config.router_type == "top-k" else 1
+        
+        # empty output dict
+        losses = {}
+
+        # aux loss
+        if self.config.homogeneous_experts or not self.config.router_use_penalty_loss:
+            aux_loss = router_load_balancing_loss(
+                router_probs=cat_router_probs,
+                k=k,
+                attention_mask=(
+                    attention_mask if self.config.router_mask_aux_loss else None
+                ),
+            )
+            if aux_loss is not None:
+                losses["aux_loss"] = aux_loss
+
+        # penalty loss
+        if self.config.router_use_penalty_loss:
+            penalty_loss = router_p_penalty_loss(
+                router_probs=cat_router_probs,
+                k=k,
+                expert_hidden_sizes=self.config.expert_intermediate_size,
+            )
+            if penalty_loss is not None:
+                losses["penalty_loss"] = penalty_loss
+
+        return losses
 
     def forward(
         self,
@@ -210,37 +247,28 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         cat_router_logits = torch.cat(router_logits, dim=0)
         cat_router_probs = torch.cat(router_probs, dim=0)
 
-        # determine k (default 1 unless top-k)
-        k = self.config.num_experts_per_tok if self.config.router_type == "top-k" else 1
-
         # router losses
-        aux_loss, penalty_loss, z_loss = None, None, None
-        if self.config.router_type == "expert-choice":
-            z_loss = router_z_loss(cat_router_logits)
-        elif self.config.homogeneous_experts:
-            aux_loss = router_load_balancing_loss(
-                router_probs=cat_router_probs,
-                k=k,
-                attention_mask=(
-                    attention_mask if self.config.router_mask_aux_loss else None
-                ),
+        router_type = self.config.router_type
+        moe_losses = {}
+        if router_type == "expert-choice":
+            moe_losses["z_loss"] = router_z_loss(cat_router_logits)
+        elif router_type == "top-k":
+            moe_losses.update(
+                self._get_balancing_loss(
+                    cat_router_probs=cat_router_probs,
+                    attention_mask=attention_mask,
+                )
             )
-            z_loss = router_z_loss(cat_router_logits)
-        else:
-            if self.config.router_use_penalty_loss:
-                penalty_loss = router_p_penalty_loss(
-                    router_probs=cat_router_probs,
-                    k=k,
-                    expert_hidden_sizes=self.config.expert_intermediate_size,
+            if "aux_loss" in moe_losses:  # homogeneous experts
+                moe_losses["z_loss"] = router_z_loss(cat_router_logits)
+        else:  # top-p
+            moe_losses.update(
+                self._get_balancing_loss(
+                    cat_router_probs=cat_router_probs,
+                    attention_mask=attention_mask,
                 )
-            else:
-                aux_loss = router_load_balancing_loss(
-                    router_probs=cat_router_probs,
-                    k=k,
-                    attention_mask=(
-                        attention_mask if self.config.router_mask_aux_loss else None
-                    ),
-                )
+            )
+            moe_losses["dynamic_loss"] = router_dynamic_loss(cat_router_probs)
 
         # outputs
         if not return_dict:
@@ -252,9 +280,7 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
                     all_self_attentions,
                     router_logits if output_router_logits else None,
                     expert_idxs if output_expert_indexes else None,
-                    z_loss,
-                    aux_loss,
-                    penalty_loss,
+                    moe_losses if moe_losses else None,
                 ]
                 if v is not None
             )
@@ -264,9 +290,7 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
             attentions=all_self_attentions,
             router_logits=router_logits if output_router_logits else None,
             expert_indexes=expert_idxs if output_expert_indexes else None,
-            z_loss=z_loss,
-            aux_loss=aux_loss,
-            penalty_loss=penalty_loss,
+            moe_losses=moe_losses if moe_losses else None,
         )
 
 
@@ -306,6 +330,7 @@ class BalmMoEForMaskedLM(
         self.router_z_loss_coef = config.router_z_loss_coef
         self.router_aux_loss_coef = config.router_aux_loss_coef
         self.router_penalty_loss_coef = self.config.router_penalty_loss_coef
+        self.router_dynamic_loss_coef = self.config.router_dynamic_loss_coef
 
         # initialize weights
         self.init_weights()
@@ -400,32 +425,25 @@ class BalmMoEForMaskedLM(
         lm_logits = self.lm_head(x)
 
         # loss
-        loss, z_loss, aux_loss, lm_loss = None, None, None, None
+        loss = None
+        moe_losses = outputs.moe_losses if outputs.moe_losses else {}
+
         if labels is not None:
             # lm loss
             labels = labels.to(lm_logits.device)
             lm_loss = self.criterion(
                 lm_logits.view(-1, self.config.vocab_size), labels.view(-1)
             )
+            moe_losses['lm_loss'] = lm_loss
 
-            # router loss(es)
-            aux_loss, penalty_loss, z_loss = None, None, None
-            if self.config.router_type == "expert-choice":
-                z_loss = self.router_z_loss_coef * (outputs.z_loss)
-                loss = lm_loss + z_loss
-            elif self.config.homogeneous_experts:
-                aux_loss = self.router_aux_loss_coef * (outputs.aux_loss)
-                z_loss = self.router_z_loss_coef * (outputs.z_loss)
-                loss = lm_loss + z_loss + aux_loss
-            else:
-                if self.config.router_use_penalty_loss:
-                    penalty_loss = self.router_penalty_loss_coef * (
-                        outputs.penalty_loss
-                    )
-                    loss = lm_loss + penalty_loss
-                else:
-                    aux_loss = self.router_aux_loss_coef * (outputs.aux_loss)
-                    loss = lm_loss + aux_loss
+            # weighted sum of losses
+            loss = (
+                lm_loss
+                + self.router_z_loss_coef * moe_losses.get("z_loss", 0.0)
+                + self.router_aux_loss_coef * moe_losses.get("aux_loss", 0.0)
+                + self.router_penalty_loss_coef * moe_losses.get("penalty_loss", 0.0)
+                + self.router_dynamic_loss_coef * moe_losses.get("dynamic_loss", 0.0)
+            )
 
         # outputs
         if not return_dict:
@@ -438,10 +456,7 @@ class BalmMoEForMaskedLM(
                     outputs.attentions,
                     outputs.router_logits,
                     outputs.expert_indexes,
-                    z_loss,
-                    aux_loss,
-                    penalty_loss,
-                    lm_loss,
+                    moe_losses,
                 ]
                 if v is not None
             )
@@ -452,10 +467,7 @@ class BalmMoEForMaskedLM(
             attentions=outputs.attentions,
             router_logits=outputs.router_logits,
             expert_indexes=outputs.expert_indexes,
-            z_loss=z_loss,
-            aux_loss=aux_loss,
-            penalty_loss=penalty_loss,
-            lm_loss=lm_loss,
+            moe_losses=moe_losses,
         )
 
 
@@ -503,6 +515,7 @@ class BalmMoEForSequenceClassification(
         self.router_z_loss_coef = self.config.router_z_loss_coef
         self.router_aux_loss_coef = self.config.router_aux_loss_coef
         self.router_penalty_loss_coef = self.config.router_penalty_loss_coef
+        self.router_dynamic_loss_coef = self.config.router_dynamic_loss_coef
 
         # initialize weights
         self.init_weights()
@@ -622,33 +635,24 @@ class BalmMoEForSequenceClassification(
             classifier_attn = None
 
         # loss
-        loss, z_loss, aux_loss, classifier_loss = None, None, None, None
+        loss = None
+        moe_losses = outputs.moe_losses if outputs.moe_losses else {}
         if labels is not None:
             labels = labels.to(classifier_logits.device)
             classifier_loss = self.criterion(
                 classifier_logits.view(-1, self.config.num_labels),
                 labels.view(-1),
             )
+            moe_losses["classifier_loss"] = classifier_loss
 
-            # router loss(es)
-            # if the base model is frozen (default), both router coeffs are zeroed out
-            aux_loss, penalty_loss, z_loss = None, None, None
-            if self.config.router_type == "expert-choice":
-                z_loss = self.router_z_loss_coef * (outputs.z_loss)
-                loss = classifier_loss + z_loss
-            elif self.config.homogeneous_experts:
-                aux_loss = self.router_aux_loss_coef * (outputs.aux_loss)
-                z_loss = self.router_z_loss_coef * (outputs.z_loss)
-                loss = classifier_loss + z_loss + aux_loss
-            else:
-                if self.config.router_use_penalty_loss:
-                    penalty_loss = self.router_penalty_loss_coef * (
-                        outputs.penalty_loss
-                    )
-                    loss = classifier_loss + penalty_loss
-                else:
-                    aux_loss = self.router_aux_loss_coef * (outputs.aux_loss)
-                    loss = classifier_loss + aux_loss
+            # weighted sum of losses
+            loss = (
+                classifier_loss
+                + self.router_z_loss_coef * moe_losses.get("z_loss", 0.0)
+                + self.router_aux_loss_coef * moe_losses.get("aux_loss", 0.0)
+                + self.router_penalty_loss_coef * moe_losses.get("penalty_loss", 0.0)
+                + self.router_dynamic_loss_coef * moe_losses.get("dynamic_loss", 0.0)
+            )
 
         # outputs
         if not return_dict:
@@ -662,10 +666,7 @@ class BalmMoEForSequenceClassification(
                     outputs.router_logits,
                     outputs.expert_indexes,
                     classifier_attn,
-                    z_loss,
-                    aux_loss,
-                    penalty_loss,
-                    classifier_loss,
+                    moe_losses,
                 ]
                 if v is not None
             )
@@ -677,8 +678,5 @@ class BalmMoEForSequenceClassification(
             router_logits=outputs.router_logits,
             expert_indexes=outputs.expert_indexes,
             classifier_attentions=classifier_attn,
-            z_loss=z_loss,
-            aux_loss=aux_loss,
-            penalty_loss=penalty_loss,
-            classifier_loss=classifier_loss,
+            moe_losses=moe_losses,
         )

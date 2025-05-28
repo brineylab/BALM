@@ -4,7 +4,7 @@
 
 # Inspired by: https://github.com/naba89/custom_hf_trainer/
 
-from typing import Dict, List, Optional
+from typing import Dict
 
 import torch
 from transformers import Trainer
@@ -27,21 +27,7 @@ if is_torch_xla_available():
 __all__ = ["MoETrainer"]
 
 
-loss_mapping = {
-    "top-k": ["lm_loss", "aux_loss", "z_loss"],
-    "top-p": ["lm_loss", "aux_loss", "z_loss"],
-    "top-k-penalty": ["lm_loss", "penalty_loss"],
-    "top-k-aux": ["lm_loss", "aux_loss"],
-    "top-p-penalty": ["lm_loss", "penalty_loss"],
-    "top-p-aux": ["lm_loss", "aux_loss"],
-    "expert-choice": ["lm_loss", "z_loss"],
-}
-
-
 class AddExtraLossesToTrainerState(TrainerCallback):
-    def __init__(self, extra_losses: List[str]):
-        self.extra_losses = extra_losses
-
     def on_train_begin(
         self,
         args: TrainingArguments,
@@ -49,9 +35,7 @@ class AddExtraLossesToTrainerState(TrainerCallback):
         control: TrainerControl,
         **kwargs
     ):
-        control.extra_losses = {
-            k: torch.tensor(0.0).to(args.device) for k in self.extra_losses
-        }
+        control.extra_losses = {}
         return control
 
 
@@ -61,23 +45,11 @@ class MoETrainer(Trainer):
     training and evaluation.
     """
 
-    def __init__(self, extra_losses: Optional[List[str]] = None, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        # extra_losses based on router type (if not provided)
-        self.router_type = self.model.config.router_type
-        if self.model.config.homogeneous_experts:
-            router_str = self.router_type
-        else:
-            penalty = self.model.config.router_use_penalty_loss
-            router_str = f"{self.router_type}{'-penalty' if penalty else '-aux'}"
-        
-        extra_losses = (
-            loss_mapping[router_str] if extra_losses is None else extra_losses
-        )
-
         # add callback for logging extra train losses
-        self.add_callback(AddExtraLossesToTrainerState(extra_losses))
+        self.add_callback(AddExtraLossesToTrainerState())
 
         # provide compute metrics (if not provided) for logging extra eval losses
         if self.compute_metrics is None:
@@ -96,14 +68,17 @@ class MoETrainer(Trainer):
                 )
 
             # extract extra losses from outputs
-            for k, v in outputs.items():
-                if k in self.control.extra_losses:
-                    if v is not None:
-                        if self.args.n_gpu > 1:
-                            v = v.mean()
-                        self.control.extra_losses[k] += (
-                            v.detach() / self.args.gradient_accumulation_steps
-                        )
+            if hasattr(outputs, "moe_losses"):
+                for k, v in outputs.moe_losses.items():
+                    # add key if it doesn't exist
+                    if k not in self.control.extra_losses:
+                        self.control.extra_losses[k] = 0.0
+
+                    if self.args.n_gpu > 1:
+                        v = v.mean()
+                    self.control.extra_losses[k] += (
+                        v.detach() / self.args.gradient_accumulation_steps
+                    )
 
             return (loss, outputs) if return_outputs else loss
         else:
@@ -185,26 +160,14 @@ class MoETrainer(Trainer):
             )
 
     def _compute_metrics(self, eval_pred: EvalPrediction):
-        predictions, labels = eval_pred
+        predictions, _ = eval_pred
 
         metrics = {}
         if isinstance(predictions, tuple):
-            # top k
-            if self.router_type == "topk" and len(predictions) == 4:
-                _, z_loss, aux_loss, lm_loss = predictions
-                metrics["lm_loss"] = lm_loss.mean()
-                metrics["z_loss"] = z_loss.mean()
-                metrics["aux_loss"] = aux_loss.mean()
-            elif (
-                self.router_type == "topk" and len(predictions) == 3
-            ):  # homogeneous experts
-                _, penalty_loss, lm_loss = predictions
-                metrics["lm_loss"] = lm_loss.mean()
-                metrics["penalty_loss"] = penalty_loss.mean()
-            # expert choice
-            elif self.router_type == "expert choice" and len(predictions) == 3:
-                _, z_loss, lm_loss = predictions
-                metrics["lm_loss"] = lm_loss.mean()
-                metrics["z_loss"] = z_loss.mean()
+            # moe_losses dict is always the final element
+            final = predictions[-1]
+            if isinstance(final, dict):
+                for k, v in final.items():
+                    metrics[k] = v.mean() if hasattr(v, "mean") else float(v)
 
         return metrics

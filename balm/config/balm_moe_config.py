@@ -81,7 +81,9 @@ class BalmMoEConfig(PretrainedConfig):
     use_p_penalty_loss: bool, default=False
         Whether or not to use p-penalty loss instead of standard aux loss.
     router_penalty_loss_coef: float, default=0.01
-        The coefficient for the p-penalty loss.
+        The coefficient for the p-penalty loss for heterogeneous sized experts.
+    router_dynamic_loss_coef: float, default=0.0001
+        The coeeficient for the dynamic loss for top-p models.
     expert_capacity_type: str, default="multiplier"
         The type of expert capacity to use.
         If "absolute": tokens per expert; if "multiplier": capacity = multiplier * max_position_embeddings
@@ -201,6 +203,7 @@ class BalmMoEConfig(PretrainedConfig):
         router_z_loss_coef: float = 0.001,
         router_use_penalty_loss: bool = False,
         router_penalty_loss_coef: float = 0.1,
+        router_dynamic_loss_coef: float = 0.0001,
         # experts
         expert_capacity_type: str = "multiplier",
         expert_capacity: int = 1,
@@ -267,6 +270,7 @@ class BalmMoEConfig(PretrainedConfig):
         self.router_z_loss_coef = float(router_z_loss_coef)
         self.router_use_penalty_loss = bool(router_use_penalty_loss)
         self.router_penalty_loss_coef = float(router_penalty_loss_coef)
+        self.router_dynamic_loss_coef = float(router_dynamic_loss_coef)
         self.expert_capacity_type = expert_capacity_type.lower()
         self.expert_capacity = expert_capacity
         self.expert_intermediate_size = self._get_expert_sizes(
