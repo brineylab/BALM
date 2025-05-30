@@ -2,7 +2,7 @@
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
-from typing import Optional, Union, List
+from typing import Optional, Union, List, Literal
 
 from transformers import PretrainedConfig
 
@@ -24,7 +24,7 @@ class BalmMoEConfig(PretrainedConfig):
     intermediate_size : int, default=None
         The intermediate size of the model.
         If not provided, defaults to (`hidden_size` * 4).
-    activation : str, default="swiglu"
+    activation : {"gelu", "relu", "glu", "swiglu", "geglu", "reglu"}, default="swiglu"
         The activation function to use for the model.
     dropout : float, default=0.1
         The dropout probability for the model. Can be overridden
@@ -43,9 +43,8 @@ class BalmMoEConfig(PretrainedConfig):
         The initializer range for the model.
     layer_norm_eps : float, default=1e-5
         The epsilon for layer normalization.
-    position_embedding_type : str, default="rotary"
+    position_embedding_type : {"rotary", "absolute"}, default="rotary"
         The type of position embeddings to use.
-        Options are "rotary" or "absolute".
     mask_token_id : int, default=31
         The mask token id.
     pad_token_id : int, default=1
@@ -63,12 +62,10 @@ class BalmMoEConfig(PretrainedConfig):
         The number of dense layers at the start of the model before any sparse layers.
     alternate_sparsity : bool, default=True
         Whether to use alternate sparse and dense layers.
-    router_type : str, default="top-k"
+    router_type : {"top-k", "top-p", "expert-choice"}, default="top-k"
         The type of router to use.
-        Options are "top-k", "top-p", or "expert-choice".
-    router_dtype : str, default="float32"
+    router_dtype : {"float32", "float16", "bfloat16"}, default="float32"
         Data type of the router tensors, that is converted to torch.dtype.
-        Options are "float32", "float16", or "bfloat16".
     router_jitter: float, default=0.0
         Jitter to apply to inputs of the router.
     router_bias: bool, default=False
@@ -82,8 +79,8 @@ class BalmMoEConfig(PretrainedConfig):
     router_penalty_loss_coef: float, default=0.1
         The coefficient for the p-penalty loss for heterogeneous sized experts.
     router_dynamic_loss_coef: float, default=0.0001
-        The coeeficient for the dynamic loss for top-p models.
-    expert_capacity_type: str, default="multiplier"
+        The coefficient for the dynamic loss for top-p models.
+    expert_capacity_type : {"absolute", "multiplier"}, default="multiplier"
         The type of expert capacity to use.
         If "absolute": tokens per expert; if "multiplier": capacity = multiplier * max_position_embeddings
     expert_capacity: int, default=1
@@ -102,14 +99,13 @@ class BalmMoEConfig(PretrainedConfig):
         If not provided:
             - If `expert_intermediate_size` is an integer, defaults to `expert_intermediate_size`.
             - If `expert_intermediate_size` is a list, defaults to the `intermediate_size`.
-    expert_activation : str, default="swiglu"
+    expert_activation : {"gelu", "relu", "glu", "swiglu", "geglu", "reglu"}, default="swiglu"
         The activation function to use for the experts.
-        Options are "swiglu", "relu", "gelu".
     expert_dropout : float
         The dropout probability for the expert layers.
     expert_bias : bool, default=True
         Whether to use a bias in expert FFN layers. Used in SparseTransformerLayers only.
-    mlm_activation: str, default="gelu"
+    mlm_activation: {"tanh", "relu", "gelu"}, default="gelu"
         The activation function to use for the LM head.
     attention_classifier: bool, default=False
         Whether to add attention to classification head.
@@ -117,7 +113,7 @@ class BalmMoEConfig(PretrainedConfig):
         Number of attention heads in the classifier.
         If not provided, defaults to `num_attention_heads`.
         Only used if `attention_classifier` is True.
-    classifier_activation: str, default=None
+    classifier_activation: {"tanh", "relu", "gelu"} or None, default=None
         The activation function to use for the classifier. If None, defaults to
         "relu" when `attention_classifier` is True and "tanh" otherwise.
     classifier_freeze_base: bool, default=True
@@ -173,7 +169,9 @@ class BalmMoEConfig(PretrainedConfig):
         num_hidden_layers: int = 6,
         num_attention_heads: int = 20,
         intermediate_size: Optional[int] = None,
-        activation: str = "swiglu",
+        activation: Literal[
+            "gelu", "relu", "glu", "swiglu", "geglu", "reglu"
+        ] = "swiglu",
         dropout: float = 0.1,
         attention_dropout: Optional[float] = None,
         hidden_dropout: Optional[float] = None,
@@ -181,7 +179,7 @@ class BalmMoEConfig(PretrainedConfig):
         max_position_embeddings: int = 256,
         initializer_range: float = 0.02,
         layer_norm_eps: float = 1e-5,
-        position_embedding_type: str = "rotary",
+        position_embedding_type: Literal["rotary", "absolute"] = "rotary",
         mask_token_id: int = 31,
         pad_token_id: int = 1,
         ## MoE params
@@ -192,8 +190,8 @@ class BalmMoEConfig(PretrainedConfig):
         num_initial_dense_layers: int = 1,
         alternate_sparsity: bool = True,
         # router
-        router_type: str = "top-k",
-        router_dtype: str = "float32",
+        router_type: Literal["top-k", "top-p", "expert-choice"] = "top-k",
+        router_dtype: Literal["float32", "float16", "bfloat16"] = "float32",
         router_jitter: float = 0.0,
         router_bias: bool = False,
         # router losses
@@ -204,19 +202,21 @@ class BalmMoEConfig(PretrainedConfig):
         router_penalty_loss_coef: float = 0.1,
         router_dynamic_loss_coef: float = 0.0001,
         # experts
-        expert_capacity_type: str = "multiplier",
+        expert_capacity_type: Literal["absolute", "multiplier"] = "multiplier",
         expert_capacity: int = 1,
         expert_intermediate_size: Optional[Union[int, List[int]]] = None,
         shared_expert_intermediate_size: Optional[int] = None,
-        expert_activation: str = "swiglu",
+        expert_activation: Literal[
+            "gelu", "relu", "glu", "swiglu", "geglu", "reglu"
+        ] = "swiglu",
         expert_dropout: Optional[float] = None,
         expert_bias: bool = True,
         # mlm
-        mlm_activation: str = "gelu",
+        mlm_activation: Literal["tanh", "relu", "gelu"] = "gelu",
         # classification
         attention_classifier: bool = False,
         classifier_attention_heads: Optional[int] = None,
-        classifier_activation: Optional[str] = None,
+        classifier_activation: Optional[Literal["tanh", "relu", "gelu"]] = None,
         classifier_freeze_base: bool = True,
         num_labels: int = 2,  # sequence/token-level classification
         output_classifier_attentions: bool = False,
