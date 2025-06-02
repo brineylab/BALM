@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "balm-antibody"
+version = "0.0.2"
+description = "BALM: Baseline Antibody Language Model"
+readme = "README.md"
+authors = [{ name = "Bryan Briney", email = "briney@scripps.edu" }]
+license = { file = "LICENSE" }
+dependencies = [
+    "accelerate",
+    "deepspeed",
+    "datasets",
+    "evaluate",
+    "numpy",
+    "pandas",
+    "polars",
+    "transformers",
+    "tokenizers",
+    "torch",
+    "tqdm"
+]
+requires-python = ">=3.8"
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Bio-Informatics"
+]
+
+[project.urls]
+Homepage = "https://github.com/brineylab/balm"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["balm*"]

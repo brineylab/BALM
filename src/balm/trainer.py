@@ -18,7 +18,6 @@ from transformers import (
     is_torch_xla_available,
     EvalPrediction,
 )
-from transformers.trainer_utils import SaveStrategy
 from packaging.version import Version
 
 if is_torch_xla_available():
@@ -64,6 +63,10 @@ class MoETrainer(Trainer):
                 "Compatibility issues may occur. For evaluation-only logging of MoE losses, consider "
                 "using the compute_metrics_MoE function, which works across transformers versions."
             )
+        
+        # try importing SaveStrategy here
+        # this may not work if the transformers version is wrong
+        from transformers.trainer_utils import SaveStrategy
 
         super().__init__(**kwargs)
 
