@@ -172,6 +172,7 @@ class MoETrainer(Trainer):
                 metrics=metrics, trial=trial
             )
 
+            from transformers.trainer_utils import SaveStrategy
             if self.args.save_strategy == SaveStrategy.BEST:
                 self.control.should_save = is_new_best_metric
 
