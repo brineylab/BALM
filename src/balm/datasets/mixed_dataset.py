@@ -109,7 +109,7 @@ def process_mixed_dataset(
     curriculum_prob: bool = None,
     seed=42,
     num_proc=128,
-    cache_dir="~/.cache/huggingface/datasets",
+    cache_dir="./.cache/",
 ):
 
     # check dict for keys
