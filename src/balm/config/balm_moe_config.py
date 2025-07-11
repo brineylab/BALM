@@ -56,7 +56,7 @@ class BalmMoEConfig(PretrainedConfig):
         The number of shared experts (which receive all tokens) in the model.
     num_experts_per_tok : int, default=1
         The number of experts to route each token to. Only used if `router_type` is "top-k".
-    top_p_threshold: float, default=0.5
+    top_p_threshold: float, default=0.7
         The probability threshold for "top-p" routing. Only used if `router_type` is "top-p".
     num_initial_dense_layers: int, default=1
         The number of dense layers at the start of the model before any sparse layers.
@@ -186,7 +186,7 @@ class BalmMoEConfig(PretrainedConfig):
         num_experts: int = 8,
         num_shared_experts: int = 0,
         num_experts_per_tok: int = 1,  # k for top-k routing (to comply with 🤗 naming)
-        top_p_threshold: float = 0.5,
+        top_p_threshold: float = 0.7,  # threshold for top-p routing
         num_initial_dense_layers: int = 1,
         alternate_sparsity: bool = True,
         # router
