@@ -9,7 +9,6 @@ import random
 from functools import partial
 
 import torch
-from accelerate import Accelerator
 from datasets import load_dataset
 from torch.utils.data import Dataset
 
@@ -36,7 +35,7 @@ class MixedProbDataset(Dataset):
     ):
         super().__init__()
 
-        # handle probablities
+        # handle probabilities
         if (constant_prob is not None) == (curriculum_prob is not None):
             raise ValueError("Specify exactly one of constant_prob or curriculum_prob.")
 
@@ -58,15 +57,15 @@ class MixedProbDataset(Dataset):
         elif constant_prob is not None:
             self.constant_prob = float(constant_prob)
 
-        # seperate unpaired and paired data
+        # separate unpaired and paired data
         self.unpaired_data = tokenized_data["unpaired"]
         self.paired_data = tokenized_data["paired"]
         self.unpaired_count = 0
         self.paired_count = 0
 
         # generator for random sampling
-        seed = seed + Accelerator().process_index
-        self.generator = torch.Generator().manual_seed(seed)
+        self.seed = seed
+        self.generator = None
 
     @property
     def current_prob(self):
@@ -76,6 +75,11 @@ class MixedProbDataset(Dataset):
 
     def set_current_step(self, step):
         self.current_step = step
+
+    def set_generator(self, accelerator):
+        if self.generator == None:
+            seed = self.seed + accelerator.process_index
+            self.generator = torch.Generator().manual_seed(seed)
 
     # when training, ignores idx provided by dataloader (b/c it has no awareness of the two datasets)
     # instead randomly selects idx from the dataset

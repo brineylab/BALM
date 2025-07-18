@@ -5,6 +5,7 @@
 # Modified from our curriculum paper: https://github.com/brineylab/curriculum-paper
 
 from accelerate import Accelerator
+from accelerate.state import AcceleratorState
 import torch
 from transformers import TrainerCallback
 import wandb
@@ -18,14 +19,22 @@ class MixedDatasetCallback(TrainerCallback):
     def __init__(self, dataset: MixedProbDataset):
         super().__init__()
         self.dataset = dataset
-        self.accelerator = Accelerator()
+        self.accelerator = None
 
         # for tracking eval losses
         self.eval_paired = None
         self.eval_unpaired = None
 
-    # log initial values
     def on_train_begin(self, args, state, control, **kwargs):
+
+        # set accelerator after it's initialized by trainer
+        if self.accelerator is None:
+            self.accelerator = Accelerator()
+
+        # set dataset generator
+        self.dataset.set_generator(accelerator=self.accelerator)
+
+        # log initial values
         if state.is_local_process_zero and wandb.run:
             wandb.log(
                 {
@@ -42,10 +51,6 @@ class MixedDatasetCallback(TrainerCallback):
 
     # add extra train and eval losses
     def on_log(self, args, state, control, logs=None, **kwargs):
-
-        # log only on the main process
-        if not state.is_local_process_zero:
-            return
 
         def calculate_epoch(count, dataset):
             if dataset:
@@ -102,7 +107,7 @@ class MixedDatasetCallback(TrainerCallback):
             )
 
         # update logs
-        if added_logs:
+        if state.is_local_process_zero and added_logs:
             logs.update(added_logs)
             if wandb.run is not None:
                 wandb.log({**added_logs, "train/global_step": state.global_step})
