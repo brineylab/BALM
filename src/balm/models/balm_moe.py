@@ -326,6 +326,7 @@ class BalmMoEForMaskedLM(
 
         # initialize weights
         self.init_weights()
+        self.post_init()
 
     def forward(
         self,
@@ -501,6 +502,7 @@ class BalmMoEForSequenceClassification(
 
         # initialize weights
         self.init_weights()
+        self.post_init()
 
         # freeze base model weights
         # and zero out router loss coeffs
