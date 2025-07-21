@@ -17,7 +17,7 @@ dependencies = [
     "numpy",
     "pandas",
     "polars",
-    "transformers",
+    "transformers<4.51.0",
     "tokenizers",
     "torch",
     "tqdm"
