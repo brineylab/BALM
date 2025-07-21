@@ -141,8 +141,8 @@ class BalmAttentionSequenceClassificationHead(nn.Module):
     def forward(
         self,
         features: torch.Tensor,
-        padding_mask: torch.Tensor,
-        need_weights: bool,
+        padding_mask: torch.Tensor = None,
+        need_weights: bool = False,
         **kwargs,
     ) -> torch.Tensor:
         """
