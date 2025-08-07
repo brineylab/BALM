@@ -142,7 +142,7 @@ class BalmModel(BalmPreTrainedModel, ParameterCountMixin):
 
             x = layer(
                 x,
-                padding_mask=attention_mask,
+                attention_mask=attention_mask,
                 need_weights=output_attentions,
             )
             if output_attentions:
@@ -433,14 +433,9 @@ class BalmForSequenceClassification(
         )
         x = outputs.last_hidden_state
 
-        # invert attention mask to padding mask and convert to boolean
-        if attention_mask is not None:
-            padding_mask = 1 - attention_mask
-            padding_mask = padding_mask.bool()
-
         # classifier
         classifier_out = self.classifier(
-            x, padding_mask=padding_mask, need_weights=output_classifier_attentions
+            x, attention_mask=attention_mask, need_weights=output_classifier_attentions
         )
         if output_classifier_attentions:
             classifier_logits, classifier_attn = classifier_out

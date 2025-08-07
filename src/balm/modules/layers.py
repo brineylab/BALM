@@ -54,7 +54,7 @@ class DenseTransformerLayer(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        padding_mask: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
         need_weights: bool = False,
     ) -> torch.Tensor:
         """
@@ -64,7 +64,7 @@ class DenseTransformerLayer(nn.Module):
         -----------
         x: torch.Tensor
             Input tensor of shape (batch_size, seq_len, model_dim)
-        padding_mask: Optional[torch.Tensor], default=None
+        attention_mask: Optional[torch.Tensor], default=None
             Boolean mask indicating padded positions (batch_size, seq_len)
         need_weights: bool, default=False
             Whether to return attention values.
@@ -79,19 +79,12 @@ class DenseTransformerLayer(nn.Module):
             Output tensor of shape (batch_size, seq_len, model_dim)
         """
 
-        # invert padding mask and convert to boolean, since the 🤗 DataCollatorForLanguageModeling
-        # uses 0 for padding tokens and 1 for other tokens, but we want True for padding tokens and
-        # False for other tokens
-        if padding_mask is not None:
-            padding_mask = 1 - padding_mask
-            padding_mask = padding_mask.bool()
-
         # attention
         residual = x
         x = self.attn_layer_norm(x)
         attn_out = self.attention(
             x,
-            padding_mask=padding_mask,
+            attention_mask=attention_mask,
             need_weights=need_weights,
         )
         attn_out, attn_vals = attn_out if need_weights else (attn_out[0], None)
@@ -157,7 +150,7 @@ class SparseTransformerLayer(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        padding_mask: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
         need_weights: bool = False,
     ) -> torch.Tensor:
         """
@@ -167,7 +160,7 @@ class SparseTransformerLayer(nn.Module):
         -----------
         x: torch.Tensor
             Input tensor of shape (batch_size, seq_len, d_model)
-        padding_mask: Optional[torch.Tensor], default=None
+        attention_mask: Optional[torch.Tensor], default=None
             Boolean mask indicating padded positions (batch_size, seq_len)
         need_weights: bool, default=False
             Whether to return attention values.
@@ -182,19 +175,12 @@ class SparseTransformerLayer(nn.Module):
             Output tensor of shape (batch_size, seq_len, d_model)
         """
 
-        # invert padding mask and convert to boolean, since the 🤗 DataCollatorForLanguageModeling
-        # uses 0 for padding tokens and 1 for other tokens, but we want True for padding tokens and
-        # False for other tokens
-        if padding_mask is not None:
-            padding_mask = 1 - padding_mask
-            padding_mask = padding_mask.bool()
-
         # attention
         residual = x
         x = self.attn_layer_norm(x)
         attn_out = self.attention(
             x,
-            padding_mask=padding_mask,
+            attention_mask=attention_mask,
             need_weights=need_weights,
         )
         attn_out, attn_vals = attn_out if need_weights else (attn_out[0], None)

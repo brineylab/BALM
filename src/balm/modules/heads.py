@@ -141,7 +141,7 @@ class BalmAttentionSequenceClassificationHead(nn.Module):
     def forward(
         self,
         features: torch.Tensor,
-        padding_mask: torch.Tensor = None,
+        attention_mask: torch.Tensor = None,
         need_weights: bool = False,
         **kwargs,
     ) -> torch.Tensor:
@@ -162,7 +162,7 @@ class BalmAttentionSequenceClassificationHead(nn.Module):
         # attention
         residual = features
         attn_out = self.attention(
-            features, padding_mask=padding_mask, need_weights=need_weights
+            features, attention_mask=attention_mask, need_weights=need_weights
         )
         x, attn_vals = attn_out if need_weights else (attn_out[0], None)
         x = residual + self.attn_dropout(x)
