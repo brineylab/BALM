@@ -69,9 +69,6 @@ class BalmConfig(PretrainedConfig):
         Only used if `attention_classifier` is True.
     output_attentions : bool, default=False
         Whether to output the attentions.
-        .. warning::
-            If `output_attentions` is True, torch can't use optimized SDPA.
-            See `here`_ for more details.
     output_hidden_states : bool, default=False
         Whether to output the hidden states.
     return_dict: bool, default = True
@@ -89,11 +86,6 @@ class BalmConfig(PretrainedConfig):
         If the FFN, mlm, or classifier activation functions are not valid.
     ValueError
         If the classifier config is not valid.
-
-    References
-    ----------
-    .. _here:
-        https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html#torch.nn.MultiheadAttention.forward
     """
 
     model_type = "balm"
