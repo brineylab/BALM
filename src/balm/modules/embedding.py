@@ -42,7 +42,8 @@ class RotaryPositionalEmbedding(nn.Module):
 
     def __init__(self, dim: int):
         super().__init__()
-        # Generate and save the inverse frequency buffer (non trainable)
+        # inverse frequency buffer
+        # register buffer as it's non-trainable
         inv_freq = 1.0 / (
             10000 ** (torch.arange(0, dim, 2, dtype=torch.int64).float() / dim)
         )
@@ -55,8 +56,8 @@ class RotaryPositionalEmbedding(nn.Module):
     def _update_cos_sin_tables(self, x, seq_dimension):
         seq_len = x.shape[seq_dimension]
 
-        # Reset the tables if the sequence length has changed,
-        # or if we're on a new device (possibly due to tracing for instance)
+        # only reset the tables if the sequence length has changed
+        # or if we're on a new device
         if seq_len != self._seq_len_cached or self._cos_cached.device != x.device:
             self._seq_len_cached = seq_len
             t = torch.arange(seq_len, device=x.device).type_as(self.inv_freq)
@@ -71,10 +72,12 @@ class RotaryPositionalEmbedding(nn.Module):
     def forward(
         self, q: torch.Tensor, k: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        # update cache if needed
         self._cos_cached, self._sin_cached = self._update_cos_sin_tables(
             k, seq_dimension=-2
         )
 
+        # apply rotary embeddings to q & k
         return (
             apply_rotary_pos_emb(q, self._cos_cached, self._sin_cached).to(
                 dtype=q.dtype
