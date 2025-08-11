@@ -70,8 +70,8 @@ class DenseTransformerLayer(nn.Module):
             Whether to return attention values.
 
             .. warning::
-                If ``need_weights`` is ``True``, torch can't use optimized SDPA.
-                See https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html
+                If ``need_weights`` is ``True``, weights are recomputed
+                and may differ slightly from the internal SDPA values
 
         Returns:
         --------
@@ -82,12 +82,11 @@ class DenseTransformerLayer(nn.Module):
         # attention
         residual = x
         x = self.attn_layer_norm(x)
-        attn_out = self.attention(
+        attn_out, attn_vals = self.attention(
             x,
             attention_mask=attention_mask,
             need_weights=need_weights,
         )
-        attn_out, attn_vals = attn_out if need_weights else (attn_out[0], None)
         x = residual + self.attn_dropout(attn_out)
 
         # FFN
@@ -166,8 +165,8 @@ class SparseTransformerLayer(nn.Module):
             Whether to return attention values.
 
             .. warning::
-                If ``need_weights`` is ``True``, torch can't use optimized SDPA.
-                See https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html
+                If ``need_weights`` is ``True``, weights are recomputed
+                and may differ slightly from the internal SDPA values
 
         Returns:
         --------
@@ -178,12 +177,11 @@ class SparseTransformerLayer(nn.Module):
         # attention
         residual = x
         x = self.attn_layer_norm(x)
-        attn_out = self.attention(
+        attn_out, attn_vals = self.attention(
             x,
             attention_mask=attention_mask,
             need_weights=need_weights,
         )
-        attn_out, attn_vals = attn_out if need_weights else (attn_out[0], None)
         x = residual + self.attn_dropout(attn_out)
 
         # sparse FFN

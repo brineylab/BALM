@@ -67,7 +67,7 @@ class SelfAttention(nn.Module):
         x: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         need_weights: bool = False,
-    ) -> torch.Tensor:
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         Forward pass for the self-attention layer.
 
@@ -79,6 +79,10 @@ class SelfAttention(nn.Module):
             Padding mask of shape (batch_size, seq_len).
         need_weights : bool, default=False
             Whether to return attention weights.
+
+            .. warning::
+                If ``need_weights`` is ``True``, weights are recomputed
+                and may differ slightly from the internal SDPA values
 
         Returns:
         --------
@@ -126,14 +130,15 @@ class SelfAttention(nn.Module):
         attn_out = self.out_proj(attn_out)
 
         # optionally compute attention weights
+        attn_weights = None
         if need_weights:
-            scores = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(self.head_dim))
-            if attention_mask is not None:
-                scores = scores.masked_fill(attention_mask, float("-inf"))
-            attn_weights = F.softmax(scores, dim=-1)
-            return attn_out, attn_weights
+            with torch.no_grad():
+                scores = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(self.head_dim))
+                if attention_mask is not None:
+                    scores = scores.masked_fill(attention_mask, float("-inf"))
+                attn_weights = F.softmax(scores, dim=-1)
 
-        return attn_out, None
+        return attn_out, attn_weights
 
     def _in_proj(
         self, x: torch.Tensor
