@@ -294,9 +294,9 @@ class SparseFFN(nn.Module):
             expert_capacity=capacity,
         )
 
-        # clone hidden states
-        # this passes hidden states unchanged for tokens that aren't sent to any expert
-        output = x_flat.clone()
+        # DONT clone hidden states
+        # tokens not sent to any expert are passed though via the residual, not here
+        output = torch.zeros_like(x_flat)
 
         # experts (excluding shared expert)
         for expert_idx, expert in enumerate(self.experts):
