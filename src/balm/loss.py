@@ -26,7 +26,7 @@ def router_z_loss(router_logits: torch.Tensor) -> torch.Tensor:
     """
     Computes the router z-loss.
 
-    The router z-loss was introduced in `Designing Effective Sparse Expert Models`_.
+    The router z-loss was introduced in `ST-MoE`_.
     It encourages router logits to remain small in an effort to improve stability.
 
     Parameters
@@ -41,7 +41,7 @@ def router_z_loss(router_logits: torch.Tensor) -> torch.Tensor:
 
     References
     ----------
-    .. _Designing Effective Sparse Expert Models:
+    .. _ST-MoE:
         https://arxiv.org/abs/2202.08906
     """
 
