@@ -72,9 +72,11 @@ class BalmMoEConfig(PretrainedConfig):
         Whether to use a bias in the router.
     router_aux_loss_coef: float, default=0.01
         The coefficient for the auxiliary loss.
+    router_mask_aux_loss: bool, default=False
+        Whether to exclude padding tokens in the auxiliary loss.
     router_z_loss_coef: float, default=0.001
         The coefficient for the z-loss.
-    use_p_penalty_loss: bool, default=False
+    router_use_penalty_loss: bool, default=False
         Whether or not to use p-penalty loss instead of standard aux loss.
     router_penalty_loss_coef: float, default=0.1
         The coefficient for the p-penalty loss for heterogeneous sized experts.
@@ -137,19 +139,6 @@ class BalmMoEConfig(PretrainedConfig):
         Whether to use the cache.
     **kwargs : dict, optional
         Additional keyword arguments are passed directly to the parent class (`transformers.PretrainedConfig`).
-
-    Raises
-    ------
-    ValueError
-        If the positional embedding type is not valid.
-    ValueError
-        If the router type is not valid.
-    ValueError
-        If the expert capacity type is not valid.
-    ValueError
-        If the FFN, expert, mlm, or classifier activation functions are not valid.
-    ValueError
-        If the classifier config is not valid.
     """
 
     model_type = "balm_moe"

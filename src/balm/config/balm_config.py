@@ -77,15 +77,6 @@ class BalmConfig(PretrainedConfig):
         Whether to use the cache.
     **kwargs : dict, optional
         Additional keyword arguments are passed to the parent class (`transformers.PretrainedConfig`).
-
-    Raises
-    ------
-    ValueError
-        If the positional embedding type is not valid.
-    ValueError
-        If the FFN, mlm, or classifier activation functions are not valid.
-    ValueError
-        If the classifier config is not valid.
     """
 
     model_type = "balm"
