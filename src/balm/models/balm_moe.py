@@ -78,7 +78,7 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         # initialize weights and apply final processing
         self.post_init()
 
-    def _get_balancing_loss(self, cat_router_probs, attention_mask):
+    def _get_balancing_loss(self, cat_router_probs, stack_router_probs):
 
         # determine k (default to 1 for top-p)
         k = self.config.num_experts_per_tok if self.config.router_type == "top-k" else 1
@@ -87,13 +87,11 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         losses = {}
 
         # aux loss
+        # pass stacked probs, to calculate per layer
         if self.config.homogeneous_experts or not self.config.router_use_penalty_loss:
             aux_loss = router_load_balancing_loss(
-                router_probs=cat_router_probs,
+                router_probs=stack_router_probs,
                 k=k,
-                attention_mask=(
-                    attention_mask if self.config.router_mask_aux_loss else None
-                ),
             )
             if aux_loss is not None:
                 losses["aux_loss"] = aux_loss
@@ -246,6 +244,7 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         # concat logits & probs for router losses
         cat_router_logits = torch.cat(router_logits, dim=0)
         cat_router_probs = torch.cat(router_probs, dim=0)
+        stack_router_probs = torch.stack(router_probs, dim=0)
 
         # router losses
         router_type = self.config.router_type
@@ -256,7 +255,7 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
             moe_losses.update(
                 self._get_balancing_loss(
                     cat_router_probs=cat_router_probs,
-                    attention_mask=attention_mask,
+                    stack_router_probs=stack_router_probs,
                 )
             )
             if "aux_loss" in moe_losses:  # homogeneous experts
@@ -265,7 +264,7 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
             moe_losses.update(
                 self._get_balancing_loss(
                     cat_router_probs=cat_router_probs,
-                    attention_mask=attention_mask,
+                    stack_router_probs=stack_router_probs,
                 )
             )
             moe_losses["dynamic_loss"] = router_dynamic_loss(cat_router_probs)
