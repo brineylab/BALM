@@ -2,7 +2,7 @@
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
-from typing import Tuple
+from typing import Tuple, Optional
 
 import torch
 import torch.nn as nn
@@ -162,7 +162,12 @@ class TopKRouter(BaseRouter):
             router_dtype=router_dtype,
         )
 
-    def forward(self, x: torch.Tensor, expert_capacity: int):
+    def forward(
+        self,
+        x: torch.Tensor,
+        expert_capacity: int,
+        attention_mask: Optional[torch.Tensor] = None,
+    ):
         """
         Parameters:
         -----------
@@ -170,6 +175,8 @@ class TopKRouter(BaseRouter):
             Shape: `(num_tokens, d_model)`. Input token representations.
         expert_capacity : int
             Maximum number of tokens each expert can process.
+        attention_mask : Optional[torch.Tensor]
+            Shape: `(num_tokens)`. Flattened boolean mask for pad tokens.
 
         Returns:
         --------
@@ -188,6 +195,11 @@ class TopKRouter(BaseRouter):
 
         # compute routing logits and probs ==> (num_tokens, num_experts)
         logits = self.linear(x)
+
+        # mask padding tokens
+        if attention_mask is not None:
+            pad_mask = ~attention_mask.bool()
+            logits[pad_mask] = float(-1e9)
 
         # softmax in higher precision (fp32 for stability)
         probs = F.softmax(logits, dim=-1, dtype=self.router_dtype)

@@ -144,6 +144,7 @@ class SparseTransformerLayer(nn.Module):
             router_dtype=config.router_dtype,
             router_jitter=config.router_jitter,
         )
+        self.router_mask_pad_logits = config.router_mask_pad_logits
         self.ffn_dropout = nn.Dropout(config.expert_dropout)
 
     def forward(
@@ -187,7 +188,12 @@ class SparseTransformerLayer(nn.Module):
         # sparse FFN
         residual = x
         x = self.ffn_layer_norm(x)
-        ffn_out, router_tuple = self.sparse_ffn(x)
+        ffn_out, router_tuple = self.sparse_ffn(
+            x,
+            attention_mask=(
+                attention_mask if self.router_mask_pad_logits else None
+            ),
+        )
         x = residual + self.ffn_dropout(ffn_out)
 
         return (x, attn_vals, router_tuple) if need_weights else (x, router_tuple)

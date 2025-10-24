@@ -262,7 +262,8 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
                     ),
                 )
             )
-            if "aux_loss" in moe_losses:  # homogeneous experts
+            # homogeneous experts, where pad tokens aren't masked
+            if "aux_loss" in moe_losses and not self.config.router_mask_pad_logits:
                 moe_losses["z_loss"] = router_z_loss(cat_router_logits)
         else:  # top-p
             moe_losses.update(

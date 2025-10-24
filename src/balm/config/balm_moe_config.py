@@ -70,6 +70,8 @@ class BalmMoEConfig(PretrainedConfig):
         Jitter to apply to inputs of the router.
     router_bias: bool, default=False
         Whether to use a bias in the router.
+    router_mask_pad_logits: bool, default=False
+        Whether to mask pad tokens in the router logits.
     router_aux_loss_coef: float, default=0.01
         The coefficient for the auxiliary loss.
     router_mask_aux_loss: bool, default=False
@@ -175,6 +177,7 @@ class BalmMoEConfig(PretrainedConfig):
         router_dtype: Literal["float32", "float16", "bfloat16"] = "float32",
         router_jitter: float = 0.0,
         router_bias: bool = False,
+        router_mask_pad_logits: bool = False,
         # router losses
         router_aux_loss_coef: float = 0.01,
         router_mask_aux_loss: bool = False,
@@ -245,6 +248,7 @@ class BalmMoEConfig(PretrainedConfig):
         self.router_dtype = router_dtype.lower()
         self.router_jitter = float(router_jitter)
         self.router_bias = bool(router_bias)
+        self.router_mask_pad_logits = bool(router_mask_pad_logits)
         self.router_aux_loss_coef = float(router_aux_loss_coef)
         self.router_mask_aux_loss = bool(router_mask_aux_loss)
         self.router_z_loss_coef = float(router_z_loss_coef)
