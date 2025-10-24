@@ -72,6 +72,8 @@ class BalmMoEConfig(PretrainedConfig):
         Whether to use a bias in the router.
     router_aux_loss_coef: float, default=0.01
         The coefficient for the auxiliary loss.
+    router_mask_aux_loss: bool, default=False
+        Whether to mask pad tokens in the auxiliary loss.
     router_z_loss_coef: float, default=0.001
         The coefficient for the z-loss.
     router_use_penalty_loss: bool, default=False
@@ -175,6 +177,7 @@ class BalmMoEConfig(PretrainedConfig):
         router_bias: bool = False,
         # router losses
         router_aux_loss_coef: float = 0.01,
+        router_mask_aux_loss: bool = False,
         router_z_loss_coef: float = 0.001,
         router_use_penalty_loss: bool = False,
         router_penalty_loss_coef: float = 0.1,
@@ -243,6 +246,7 @@ class BalmMoEConfig(PretrainedConfig):
         self.router_jitter = float(router_jitter)
         self.router_bias = bool(router_bias)
         self.router_aux_loss_coef = float(router_aux_loss_coef)
+        self.router_mask_aux_loss = bool(router_mask_aux_loss)
         self.router_z_loss_coef = float(router_z_loss_coef)
         self.router_use_penalty_loss = bool(router_use_penalty_loss)
         self.router_penalty_loss_coef = float(router_penalty_loss_coef)

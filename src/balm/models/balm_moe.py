@@ -78,7 +78,7 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         # initialize weights and apply final processing
         self.post_init()
 
-    def _get_balancing_loss(self, cat_router_probs, stack_router_probs):
+    def _get_balancing_loss(self, cat_router_probs, stack_router_probs, attention_mask):
 
         # determine k (default to 1 for top-p)
         k = self.config.num_experts_per_tok if self.config.router_type == "top-k" else 1
@@ -92,6 +92,7 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
             aux_loss = router_load_balancing_loss(
                 router_probs=stack_router_probs,
                 k=k,
+                attention_mask=attention_mask,
             )
             if aux_loss is not None:
                 losses["aux_loss"] = aux_loss
@@ -256,6 +257,9 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
                 self._get_balancing_loss(
                     cat_router_probs=cat_router_probs,
                     stack_router_probs=stack_router_probs,
+                    attention_mask=(
+                        attention_mask if self.config.router_mask_aux_loss else None
+                    ),
                 )
             )
             if "aux_loss" in moe_losses:  # homogeneous experts

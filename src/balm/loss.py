@@ -54,6 +54,7 @@ def router_z_loss(router_logits: torch.Tensor) -> torch.Tensor:
 def router_load_balancing_loss(
     router_probs: torch.Tensor,
     k: int,
+    attention_mask: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Computes the auxiliary load balancing loss.
@@ -76,6 +77,8 @@ def router_load_balancing_loss(
         where num_tokens is (batch_size * seq_len)
     k: int
         Number of experts each token is routed to (for topK routing).
+    attention_mask: torch.Tensor, optional
+        Attention mask of shape: [batch_size, seq_len].
 
     Returns
     -------
@@ -92,6 +95,7 @@ def router_load_balancing_loss(
     """
 
     num_layers, num_tokens, num_experts = router_probs.shape
+    device = router_probs.device
 
     # apply top-k across probs for all layers ==> (num_layers, num_tokens, k)
     _, selected_experts = torch.topk(router_probs, k, dim=-1)
@@ -102,11 +106,33 @@ def router_load_balancing_loss(
     # compress top-k ==> (num_layers, num_tokens, num_experts)
     expert_mask = torch.max(expert_mask, dim=-2).values.float()
 
-    # compute the percentage of tokens routed to each experts ==> (num_layers, num_experts)
-    tokens_per_expert = torch.mean(expert_mask.float(), dim=1)
+    # factor attention_mask
+    if attention_mask is None:
+        # compute the percentage of tokens routed to each experts ==> (num_layers, num_experts)
+        tokens_per_expert = torch.mean(expert_mask.float(), dim=1)
 
-    # compute the average probability of routing to these experts ==> (num_layers, num_experts)
-    router_prob_per_expert = torch.mean(router_probs, dim=1)
+        # compute the average probability of routing to these experts ==> (num_layers, num_experts)
+        router_prob_per_expert = torch.mean(router_probs, dim=1)
+    else:
+        batch_size, sequence_length = attention_mask.shape
+
+        # reshape attention mask
+        expert_attention_mask = (
+            attention_mask[None, :, :, None]
+            .expand((num_layers, batch_size, sequence_length, num_experts))
+            .reshape(num_layers, -1, num_experts)
+            .to(device)
+        )
+
+        # compute the percentage of tokens routed to each experts ==> (num_layers, num_experts)
+        tokens_per_expert = torch.sum(
+            expert_mask.float() * expert_attention_mask, dim=1
+        ) / torch.sum(expert_attention_mask, dim=1)
+
+        # compute the average probability of routing to these experts ==> (num_layers, num_experts)
+        router_prob_per_expert = torch.sum(
+            router_probs * expert_attention_mask, dim=1
+        ) / torch.sum(expert_attention_mask, dim=1)
 
     return torch.mean(tokens_per_expert * router_prob_per_expert) * num_experts**2
 
