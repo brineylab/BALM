@@ -131,20 +131,22 @@ class SparseTransformerLayer(nn.Module):
             model_dim=config.hidden_size,
             expert_ffn_dims=config.expert_intermediate_size,
             shared_ffn_dim=config.shared_expert_intermediate_size,
-            expert_activation=config.expert_activation,
-            expert_bias=config.expert_bias,
             num_experts=config.num_experts,
             num_shared_experts=config.num_shared_experts,
             expert_capacity_type=config.expert_capacity_type,
             expert_capacity=config.expert_capacity,
+            expert_activation=config.expert_activation,
+            expert_bias=config.expert_bias,
             k=config.num_experts_per_tok,
             top_p_threshold=config.top_p_threshold,
             router_type=config.router_type,
             router_bias=config.router_bias,
             router_dtype=config.router_dtype,
             router_jitter=config.router_jitter,
+            router_mask_pad_logits=config.router_mask_pad_logits,
+            router_mask_pad_probs=config.router_mask_pad_probs,
         )
-        self.router_mask_pad_logits = config.router_mask_pad_logits
+        self.pass_attention_mask = config.router_mask_pad_logits or config.router_mask_pad_probs
         self.ffn_dropout = nn.Dropout(config.expert_dropout)
 
     def forward(
@@ -191,7 +193,7 @@ class SparseTransformerLayer(nn.Module):
         ffn_out, router_tuple = self.sparse_ffn(
             x,
             attention_mask=(
-                attention_mask if self.router_mask_pad_logits else None
+                attention_mask if self.pass_attention_mask else None
             ),
         )
         x = residual + self.ffn_dropout(ffn_out)

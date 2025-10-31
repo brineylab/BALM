@@ -250,7 +250,7 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
         # router losses
         router_type = self.config.router_type
         moe_losses = {}
-        if router_type == "expert-choice":
+        if router_type == "expert-choice" and not self.config.router_mask_pad_logits:
             moe_losses["z_loss"] = router_z_loss(cat_router_logits)
         elif router_type == "top-k":
             moe_losses.update(
@@ -265,11 +265,14 @@ class BalmMoEModel(BalmPreTrainedModel, ParameterCountMixin):
             # homogeneous experts, where pad tokens aren't masked
             if "aux_loss" in moe_losses and not self.config.router_mask_pad_logits:
                 moe_losses["z_loss"] = router_z_loss(cat_router_logits)
-        else:  # top-p
+        elif router_type == "top-p":
             moe_losses.update(
                 self._get_balancing_loss(
                     cat_router_probs=cat_router_probs,
                     stack_router_probs=stack_router_probs,
+                    attention_mask=(
+                        attention_mask if self.config.router_mask_aux_loss else None
+                    ),
                 )
             )
             moe_losses["dynamic_loss"] = router_dynamic_loss(cat_router_probs)

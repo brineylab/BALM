@@ -33,10 +33,14 @@ class BaseRouter(nn.Module):
         num_experts: int,
         router_bias: bool,
         router_dtype: str,
+        router_mask_pad_logits: bool,
+        router_mask_pad_probs: bool,
         **kwargs,
     ):
         super().__init__()
         self.num_experts = num_experts
+        self.router_mask_pad_logits = router_mask_pad_logits
+        self.router_mask_pad_probs = router_mask_pad_probs
         self.router_dtype = self._str_to_dtype(router_dtype)
         self.linear = nn.Linear(d_model, num_experts, bias=router_bias)
 
@@ -152,6 +156,8 @@ class TopKRouter(BaseRouter):
         router_bias: bool,
         router_dtype: str,
         k: int,
+        router_mask_pad_logits: bool,
+        router_mask_pad_probs: bool,
         **kwargs,
     ):
         self.k = k
@@ -160,6 +166,8 @@ class TopKRouter(BaseRouter):
             num_experts=num_experts,
             router_bias=router_bias,
             router_dtype=router_dtype,
+            router_mask_pad_logits=router_mask_pad_logits,
+            router_mask_pad_probs=router_mask_pad_probs,
         )
 
     def forward(
@@ -196,8 +204,8 @@ class TopKRouter(BaseRouter):
         # compute routing logits and probs ==> (num_tokens, num_experts)
         logits = self.linear(x)
 
-        # mask padding tokens
-        if attention_mask is not None:
+        # mask pad tokens in logits
+        if self.router_mask_pad_logits and (attention_mask is not None):
             pad_mask = ~attention_mask.bool()
             logits[pad_mask] = float(-1e9)
 
@@ -210,9 +218,16 @@ class TopKRouter(BaseRouter):
         # convert back to original dtype
         topk_probs = topk_probs.to(x.dtype)
 
-        # normalize probs to sum to 1
-        # but save unnormalized probs for sorting
+        # save unnormalized probs for sorting
         unnorm_topk_probs = topk_probs.clone().detach()
+
+        # lower probability of padding tokens
+        # only in the unnormalized probs, for sorting only
+        if self.router_mask_pad_probs and (attention_mask is not None):
+            pad_mask = ~attention_mask.bool()
+            unnorm_topk_probs[pad_mask] = float(1e-9)
+
+        # normalize top-k probs to sum to 1
         topk_probs /= topk_probs.sum(dim=-1, keepdim=True)
 
         # flatten top-k expert IDs and probs ==> (num_tokens * k)
@@ -260,6 +275,8 @@ class TopPRouter(BaseRouter):
         router_bias: bool,
         router_dtype: str,
         top_p_threshold: float,
+        router_mask_pad_logits: bool,
+        router_mask_pad_probs: bool,
         **kwargs,
     ):
         self.threshold = top_p_threshold
@@ -268,6 +285,8 @@ class TopPRouter(BaseRouter):
             num_experts=num_experts,
             router_bias=router_bias,
             router_dtype=router_dtype,
+            router_mask_pad_logits=router_mask_pad_logits,
+            router_mask_pad_probs=router_mask_pad_probs,
         )
 
     def forward(
@@ -303,8 +322,8 @@ class TopPRouter(BaseRouter):
         # compute routing logits and probs ==> (num_tokens, num_experts)
         logits = self.linear(x)
 
-        # mask padding tokens
-        if attention_mask is not None:
+        # mask pad tokens in logits
+        if self.router_mask_pad_logits and (attention_mask is not None):
             pad_mask = ~attention_mask.bool()
             logits[pad_mask] = float(-1e9)
 
@@ -395,8 +414,8 @@ class ExpertChoiceRouter(BaseRouter):
         # compute routing logits ==> (num_tokens, num_experts)
         logits = self.linear(x)
 
-        # mask padding tokens
-        if attention_mask is not None:
+        # mask pad tokens in logits
+        if self.router_mask_pad_logits and (attention_mask is not None):
             pad_mask = ~attention_mask.bool()
             logits[pad_mask] = float(-1e9)
 

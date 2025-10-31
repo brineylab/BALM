@@ -71,7 +71,10 @@ class BalmMoEConfig(PretrainedConfig):
     router_bias: bool, default=False
         Whether to use a bias in the router.
     router_mask_pad_logits: bool, default=False
-        Whether to mask pad tokens in the router logits.
+        Whether to mask pad tokens in the router logits (prior to softmax).
+    router_mask_pad_probs: bool, default=False
+        Whether to mask pad tokens in the router probabilities (after softmax, prior to sorting).
+        This only applies when the `router_type` is "top-k".
     router_aux_loss_coef: float, default=0.01
         The coefficient for the auxiliary loss.
     router_mask_aux_loss: bool, default=False
@@ -178,6 +181,7 @@ class BalmMoEConfig(PretrainedConfig):
         router_jitter: float = 0.0,
         router_bias: bool = False,
         router_mask_pad_logits: bool = False,
+        router_mask_pad_probs: bool = False,
         # router losses
         router_aux_loss_coef: float = 0.01,
         router_mask_aux_loss: bool = False,
@@ -249,6 +253,7 @@ class BalmMoEConfig(PretrainedConfig):
         self.router_jitter = float(router_jitter)
         self.router_bias = bool(router_bias)
         self.router_mask_pad_logits = bool(router_mask_pad_logits)
+        self.router_mask_pad_probs = bool(router_mask_pad_probs)
         self.router_aux_loss_coef = float(router_aux_loss_coef)
         self.router_mask_aux_loss = bool(router_mask_aux_loss)
         self.router_z_loss_coef = float(router_z_loss_coef)
@@ -309,6 +314,10 @@ class BalmMoEConfig(PretrainedConfig):
         if self.expert_capacity <= 0 and self.router_type == "expert-choice":
             raise ValueError(
                 f"Invalid expert capacity: {str(self.expert_capacity)}. Expert capacity must be a positive integer for the Expert Choice router."
+            )
+        if self.router_mask_pad_probs and self.router_type != "top-k":
+            raise ValueError(
+                f"Masking pad token probabilities in the router is only compatible with the Top-K router."
             )
         # check base activations
         base_activations = ["gelu", "relu", "glu", "swiglu", "geglu", "reglu"]

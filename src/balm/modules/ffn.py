@@ -166,14 +166,16 @@ class SparseFFN(nn.Module):
         num_shared_experts: int,
         expert_capacity_type: str,
         expert_capacity: Union[int, float],
+        expert_activation: str,
+        expert_bias: bool,
         k: int,
         top_p_threshold: float,
-        router_type: str = "top-k",
-        router_bias: bool = False,
-        router_dtype: str = "float32",
-        router_jitter: float = 0.0,
-        expert_activation: str = "swiglu",
-        expert_bias: bool = True,
+        router_type: str,
+        router_bias: bool,
+        router_dtype: str,
+        router_jitter: float,
+        router_mask_pad_logits: bool,
+        router_mask_pad_probs: bool,
     ):
         super().__init__()
         self.num_experts = num_experts - num_shared_experts  # subtract shared experts
@@ -189,6 +191,8 @@ class SparseFFN(nn.Module):
             router_dtype=router_dtype,
             k=k,
             top_p_threshold=top_p_threshold,
+            router_mask_pad_logits=router_mask_pad_logits,
+            router_mask_pad_probs=router_mask_pad_probs,
         )
 
         # experts
