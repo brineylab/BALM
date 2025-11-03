@@ -2,7 +2,7 @@
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
-from typing import Tuple, Union, List
+from typing import Tuple, Union, List, Optional
 
 import torch
 import torch.nn as nn
@@ -166,14 +166,16 @@ class SparseFFN(nn.Module):
         num_shared_experts: int,
         expert_capacity_type: str,
         expert_capacity: Union[int, float],
+        expert_activation: str,
+        expert_bias: bool,
         k: int,
         top_p_threshold: float,
-        router_type: str = "top-k",
-        router_bias: bool = False,
-        router_dtype: str = "float32",
-        router_jitter: float = 0.0,
-        expert_activation: str = "swiglu",
-        expert_bias: bool = True,
+        router_type: str,
+        router_bias: bool,
+        router_dtype: str,
+        router_jitter: float,
+        router_mask_pad_logits: bool,
+        router_mask_pad_probs: bool,
     ):
         super().__init__()
         self.num_experts = num_experts - num_shared_experts  # subtract shared experts
@@ -189,6 +191,8 @@ class SparseFFN(nn.Module):
             router_dtype=router_dtype,
             k=k,
             top_p_threshold=top_p_threshold,
+            router_mask_pad_logits=router_mask_pad_logits,
+            router_mask_pad_probs=router_mask_pad_probs,
         )
 
         # experts
@@ -245,6 +249,7 @@ class SparseFFN(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Forward pass for the SparseFFN layer.
@@ -253,7 +258,7 @@ class SparseFFN(nn.Module):
         -----------
         x : torch.Tensor
             Input tensor of shape (batch_size, seq_len, model_dim).
-        padding_mask: Optional[torch.Tensor], default=None
+        attention_mask: Optional[torch.Tensor], default=None
             Boolean mask indicating padded positions (batch_size, seq_len)
 
         Returns:
@@ -280,6 +285,11 @@ class SparseFFN(nn.Module):
         # flatten logits
         x_flat = x.view(-1, d_model)  # ==> (num_tokens, d_model)
 
+        # flatten attention mask if provided
+        attention_flat = None
+        if attention_mask is not None:
+            attention_flat = attention_mask.view(-1) # ==> (num_tokens)
+
         # expert capacity
         capacity = (
             self._compute_multiplier_capacity(num_tokens)
@@ -291,6 +301,7 @@ class SparseFFN(nn.Module):
         # probs and indices are shape (num_experts, expert_capacity)
         router_logits, router_probs, expert_probs, expert_indices = self.router(
             x_flat,
+            attention_mask=attention_flat,
             expert_capacity=capacity,
         )
 
