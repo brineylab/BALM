@@ -19,6 +19,7 @@ from transformers import (
     EvalPrediction,
 )
 from packaging.version import Version
+import gc
 
 if is_torch_xla_available():
     import torch_xla.core.xla_model as xm
@@ -193,5 +194,12 @@ def compute_metrics_MoE(eval_pred: EvalPrediction):
         if isinstance(final, dict):
             for k, v in final.items():
                 metrics[k] = v.mean() if hasattr(v, "mean") else float(v)
+        
+        final.clear()
+
+    # make sure predictions are cleared from memory
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     return metrics
