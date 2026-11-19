@@ -82,6 +82,9 @@ class BalmTokenizer(PreTrainedTokenizerFast):
         
         vocab_dict = {token: i for i, token in enumerate(vocab)}
 
+        # transformers 5 passes special tokens from tokenizer_config.json as AddedToken objects
+        bos_token, eos_token, unk_token = str(bos_token), str(eos_token), str(unk_token)
+
         # create tokenizer
         tokenizer = Tokenizer(
             WordLevel(
